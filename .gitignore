@@ -1,0 +1,23 @@
+# Binary
+copilot
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+
+# macOS
+.DS_Store
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
