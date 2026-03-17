@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 
 	"ai_code/internal/usecase"
 )
@@ -73,7 +73,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleAgentDone(msg)
 	}
 
-	// 处理文本输入
+	// 处理文本输入（不在模型选择器状态时）
 	if m.state != StateModelSelector {
 		if ti, ok := m.textInput.(*textinput.Model); ok {
 			var cmd tea.Cmd

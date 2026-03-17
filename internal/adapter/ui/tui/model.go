@@ -13,7 +13,8 @@ import (
 type ModelState int
 
 const (
-	StateInput ModelState = iota
+	StateWelcome ModelState = iota
+	StateInput
 	StateModelSelector
 	StateProcessing
 )
@@ -27,13 +28,16 @@ type UIMessage struct {
 // Model TUI 模型
 type Model struct {
 	// 状态
-	state      ModelState
-	quitting   bool
-	thinking   bool
-	debug      bool
+	state    ModelState
+	quitting bool
+	thinking bool
+	debug    bool
+
+	// 当前用户输入
+	currentInput string
 
 	// 输入组件
-	textInput  interface{} // *textinput.Model
+	textInput interface{} // *textinput.Model
 
 	// LLM 客户端
 	llmClient port.LLMClient
@@ -73,11 +77,11 @@ type ModelOption func(*Model)
 // NewModel 创建模型
 func NewModel(llmClient port.LLMClient, session *entity.Session, toolReg port.ToolRegistry, opts ...ModelOption) *Model {
 	m := &Model{
-		state:           StateInput,
-		llmClient:       llmClient,
-		session:         session,
-		toolReg:         toolReg,
-		messages:        []UIMessage{},
+		state:     StateInput,
+		llmClient: llmClient,
+		session:   session,
+		toolReg:   toolReg,
+		messages:  []UIMessage{},
 		availableModels: []string{
 			"qwen3-coder-plus",
 			"qwen3-max",

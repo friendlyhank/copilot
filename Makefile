@@ -1,7 +1,7 @@
 .PHONY: build run test clean lint fmt help
 
 # 变量
-APP_NAME := ai_code
+APP_NAME := copilot
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 BUILD_DIR := bin
 CMD_DIR := cmd/ai_code
@@ -13,6 +13,9 @@ GOTEST := $(GOCMD) test
 GOGET := $(GOCMD) get
 GOMOD := $(GOCMD) mod
 GOFMT := gofmt
+
+# 环境变量
+export GOSUMDB := sum.golang.org
 
 # 构建标志
 LDFLAGS := -ldflags "-X main.Version=$(VERSION)"

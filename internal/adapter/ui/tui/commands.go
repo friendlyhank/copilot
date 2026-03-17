@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 
 	"ai_code/internal/usecase"
 )
@@ -29,7 +29,24 @@ func (m *Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 	case cmd == "/help":
 		m.messages = append(m.messages, UIMessage{
 			Type: usecase.OutputText,
-			Content: "Commands:\n  /model - Switch model\n  /help - Show help\n  /clear - Clear messages\n  Tab - Toggle thinking\n  Ctrl+C - Quit",
+			Content: `📚 AI Code Help
+
+Commands:
+  /model  - Switch AI model
+  /help   - Show this help message
+  /clear  - Clear conversation history
+  /quit   - Exit application
+
+Keyboard Shortcuts:
+  Tab     - Toggle thinking mode
+  Enter   - Send message / Confirm selection
+  Esc     - Cancel / Go back
+  Ctrl+C  - Quit application
+
+Tips:
+  • Enable thinking mode for complex tasks
+  • Use /model to switch between different AI models
+  • Press Esc to cancel ongoing operations`,
 		})
 	case cmd == "/clear":
 		m.messages = []UIMessage{}
@@ -52,6 +69,9 @@ func (m *Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 
 // handleMessage 处理消息
 func (m *Model) handleMessage(input string) (tea.Model, tea.Cmd) {
+	// 保存当前输入
+	m.currentInput = input
+
 	systemPrompt := fmt.Sprintf(
 		"You are a coding agent at %s. Use bash tool to solve tasks. Be concise.",
 		m.cwd,
@@ -77,15 +97,7 @@ func (m *Model) handleMessage(input string) (tea.Model, tea.Cmd) {
 	m.state = StateProcessing
 	m.elapsedSeconds = 0
 
-	return m, tea.Batch(m.tick(), m.runAgent())
-}
-
-// runAgent 运行 Agent
-func (m *Model) runAgent() tea.Cmd {
-	return tea.Batch(
-		m.startAgent(),
-		m.listenOutput(),
-	)
+	return m, tea.Batch(m.tick(), m.startAgent(), m.listenOutput())
 }
 
 // startAgent 启动 Agent
@@ -98,9 +110,7 @@ func (m *Model) startAgent() tea.Cmd {
 		go func() {
 			defer m.wg.Done()
 			defer close(m.outputChan)
-			if lastMsg := m.session.LastMessage(); lastMsg != nil {
-				_ = m.agent.ProcessMessage(ctx, lastMsg.Content)
-			}
+			_ = m.agent.ProcessMessage(ctx, m.currentInput)
 		}()
 
 		return nil

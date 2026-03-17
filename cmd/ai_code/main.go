@@ -73,6 +73,7 @@ func main() {
 	// 初始化文本输入
 	ti := textinput.New()
 	ti.Placeholder = "Type your message or /model"
+	ti.Prompt = "" // 使用自定义样式的提示符
 	ti.Focus()
 	ti.CharLimit = 500
 	ti.Width = 60
