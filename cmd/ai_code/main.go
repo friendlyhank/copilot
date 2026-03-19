@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -49,18 +50,31 @@ func main() {
 		llmClient.SetDebug(true)
 	}
 
-	// 创建工具注册表
-	toolReg := tool.NewRegistry()
-	toolReg.Register(tool.NewBashTool())
-
-	// 创建会话
-	session := entity.NewSession(cfg.LLM.Model, cfg.LLM.Provider)
-
 	// 获取工作目录
 	cwd, err := os.Getwd()
 	if err != nil {
 		cwd = "."
 	}
+
+	// 创建工具注册表并注册所有工具
+	// 核心洞察: 加工具 = 加 handler + 加 schema，循环不变
+	toolReg := tool.NewRegistry()
+	toolReg.Register(tool.NewBashTool(
+		tool.WithTimeout(time.Duration(cfg.LLM.Timeout)*time.Second),
+		tool.WithCWD(cwd),
+	))
+	toolReg.Register(tool.NewReadFileTool(
+		tool.WithReadFileCWD(cwd),
+	))
+	toolReg.Register(tool.NewWriteFileTool(
+		tool.WithWriteFileCWD(cwd),
+	))
+	toolReg.Register(tool.NewEditFileTool(
+		tool.WithEditFileCWD(cwd),
+	))
+
+	// 创建会话
+	session := entity.NewSession(cfg.LLM.Model, cfg.LLM.Provider)
 
 	// 创建 TUI 模型
 	model := tui.NewModel(llmClient, session, toolReg,

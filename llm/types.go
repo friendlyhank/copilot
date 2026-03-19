@@ -41,6 +41,7 @@ type ChatRequest struct {
 	MaxTokens   int       `json:"max_tokens"`
 	Temperature float64   `json:"temperature"`
 	Tools       []Tool    `json:"tools,omitempty"`
+	ToolChoice  any       `json:"tool_choice,omitempty"` // "auto", "none", or {"type": "function", "function": {"name": "xxx"}}
 }
 
 // ChatResponse 通用聊天响应

@@ -33,7 +33,12 @@ type Output struct {
 // OutputHandler 输出处理函数
 type OutputHandler func(Output)
 
+// ToolHandler 工具处理函数类型
+type ToolHandler func(args map[string]interface{}) string
+
 // Agent AI代理
+// 核心洞察: "加工具不需要改循环"
+// 只需在 TOOL_HANDLERS 中添加新的 handler，循环本身不变
 type Agent struct {
 	Client   llm.Client
 	Messages []llm.Message
@@ -41,11 +46,32 @@ type Agent struct {
 	System   string
 	Debug    bool
 	Handler  OutputHandler
+
+	// 工具调度表 - dispatch map
+	toolHandlers map[string]ToolHandler
+	cwd          string
 }
 
 // NewAgent 创建新Agent
 func NewAgent(client llm.Client, systemPrompt string) *Agent {
-	tools := []llm.Tool{
+	cwd, _ := os.Getwd()
+
+	a := &Agent{
+		Client: client,
+		System: systemPrompt,
+		cwd:    cwd,
+	}
+
+	// 初始化工具
+	a.initTools()
+
+	return a
+}
+
+// initTools 初始化工具 - 在这里添加新工具
+func (a *Agent) initTools() {
+	// 工具定义
+	a.Tools = []llm.Tool{
 		{
 			Type: "function",
 			Function: llm.ToolFunction{
@@ -63,12 +89,82 @@ func NewAgent(client llm.Client, systemPrompt string) *Agent {
 				},
 			},
 		},
+		{
+			Type: "function",
+			Function: llm.ToolFunction{
+				Name:        "read_file",
+				Description: "Read file contents. Returns the text content of a file.",
+				Parameters: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"path": map[string]interface{}{
+							"type":        "string",
+							"description": "The path to the file to read",
+						},
+						"limit": map[string]interface{}{
+							"type":        "integer",
+							"description": "Optional: maximum number of lines to read",
+						},
+					},
+					"required": []string{"path"},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: llm.ToolFunction{
+				Name:        "write_file",
+				Description: "Write content to file. Creates the file if it doesn't exist, overwrites if it does.",
+				Parameters: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"path": map[string]interface{}{
+							"type":        "string",
+							"description": "The path to the file to write",
+						},
+						"content": map[string]interface{}{
+							"type":        "string",
+							"description": "The content to write to the file",
+						},
+					},
+					"required": []string{"path", "content"},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: llm.ToolFunction{
+				Name:        "edit_file",
+				Description: "Replace exact text in file. Finds and replaces the first occurrence of old_text with new_text.",
+				Parameters: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"path": map[string]interface{}{
+							"type":        "string",
+							"description": "The path to the file to edit",
+						},
+						"old_text": map[string]interface{}{
+							"type":        "string",
+							"description": "The exact text to find and replace",
+						},
+						"new_text": map[string]interface{}{
+							"type":        "string",
+							"description": "The text to replace old_text with",
+						},
+					},
+					"required": []string{"path", "old_text", "new_text"},
+				},
+			},
+		},
 	}
 
-	return &Agent{
-		Client: client,
-		Tools:  tools,
-		System: systemPrompt,
+	// 工具处理函数调度表 - dispatch map
+	// 添加新工具 = 在这里添加 handler
+	a.toolHandlers = map[string]ToolHandler{
+		"bash":       a.runBash,
+		"read_file":  a.runReadFile,
+		"write_file": a.runWriteFile,
+		"edit_file":  a.runEditFile,
 	}
 }
 
@@ -123,8 +219,46 @@ func (a *Agent) callAPI(ctx context.Context) (*llm.ChatResponse, error) {
 	return a.Client.Chat(ctx, req)
 }
 
+// safePath 检查路径是否在工作目录内
+func (a *Agent) safePath(path string) (string, error) {
+	absPath := path
+	if !strings.HasPrefix(path, "/") {
+		absPath = a.cwd + "/" + path
+	}
+
+	// 清理路径
+	absPath = strings.ReplaceAll(absPath, "//", "/")
+
+	// 简单检查路径逃逸
+	if strings.Contains(absPath, "..") {
+		// 检查是否逃出工作目录
+		cleanPath := absPath
+		for strings.Contains(cleanPath, "..") {
+			idx := strings.Index(cleanPath, "..")
+			if idx >= 2 {
+				// 找到前一个 /
+				prevSlash := strings.LastIndex(cleanPath[:idx], "/")
+				if prevSlash >= 0 {
+					cleanPath = cleanPath[:prevSlash] + cleanPath[idx+2:]
+				}
+			}
+		}
+		if !strings.HasPrefix(cleanPath, a.cwd) {
+			return "", fmt.Errorf("path escapes workspace: %s", path)
+		}
+		absPath = cleanPath
+	}
+
+	return absPath, nil
+}
+
 // runBash 执行bash命令
-func runBash(command string) string {
+func (a *Agent) runBash(args map[string]interface{}) string {
+	command, ok := args["command"].(string)
+	if !ok {
+		return "Error: missing command argument"
+	}
+
 	// 危险命令检查
 	dangerous := []string{"rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"}
 	for _, d := range dangerous {
@@ -133,13 +267,8 @@ func runBash(command string) string {
 		}
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		cwd = "."
-	}
-
 	cmd := exec.Command("bash", "-c", command)
-	cmd.Dir = cwd
+	cmd.Dir = a.cwd
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -152,7 +281,7 @@ func runBash(command string) string {
 	})
 	defer timer.Stop()
 
-	err = cmd.Run()
+	err := cmd.Run()
 	output := stdout.String() + stderr.String()
 	output = strings.TrimSpace(output)
 
@@ -173,7 +302,112 @@ func runBash(command string) string {
 	return output
 }
 
+// runReadFile 读取文件
+func (a *Agent) runReadFile(args map[string]interface{}) string {
+	path, ok := args["path"].(string)
+	if !ok {
+		return "Error: missing path argument"
+	}
+
+	safePath, err := a.safePath(path)
+	if err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+
+	content, err := os.ReadFile(safePath)
+	if err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+
+	text := string(content)
+
+	// 处理行数限制
+	if limit, ok := args["limit"].(float64); ok {
+		lines := strings.Split(text, "\n")
+		if int(limit) < len(lines) {
+			lines = lines[:int(limit)]
+			text = strings.Join(lines, "\n") + fmt.Sprintf("\n... (%d more lines)", len(lines)-int(limit))
+		}
+	}
+
+	if len(text) > 50000 {
+		text = text[:50000]
+	}
+
+	return text
+}
+
+// runWriteFile 写入文件
+func (a *Agent) runWriteFile(args map[string]interface{}) string {
+	path, ok := args["path"].(string)
+	if !ok {
+		return "Error: missing path argument"
+	}
+	content, ok := args["content"].(string)
+	if !ok {
+		return "Error: missing content argument"
+	}
+
+	safePath, err := a.safePath(path)
+	if err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+
+	// 创建父目录
+	dir := safePath[:strings.LastIndex(safePath, "/")]
+	if dir != "" {
+		os.MkdirAll(dir, 0755)
+	}
+
+	if err := os.WriteFile(safePath, []byte(content), 0644); err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+
+	return fmt.Sprintf("Wrote %d bytes to %s", len(content), path)
+}
+
+// runEditFile 编辑文件
+func (a *Agent) runEditFile(args map[string]interface{}) string {
+	path, ok := args["path"].(string)
+	if !ok {
+		return "Error: missing path argument"
+	}
+	oldText, ok := args["old_text"].(string)
+	if !ok {
+		return "Error: missing old_text argument"
+	}
+	newText, ok := args["new_text"].(string)
+	if !ok {
+		return "Error: missing new_text argument"
+	}
+
+	safePath, err := a.safePath(path)
+	if err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+
+	content, err := os.ReadFile(safePath)
+	if err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+
+	text := string(content)
+	if !strings.Contains(text, oldText) {
+		return fmt.Sprintf("Error: Text not found in %s", path)
+	}
+
+	// 只替换第一个匹配
+	newContent := strings.Replace(text, oldText, newText, 1)
+
+	if err := os.WriteFile(safePath, []byte(newContent), 0644); err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+
+	return fmt.Sprintf("Edited %s", path)
+}
+
 // Loop 执行Agent循环
+// 核心洞察: 循环不变，工具通过 dispatch map 调度
 func (a *Agent) Loop(ctx context.Context) error {
 	defer a.emit(OutputDone, "")
 
@@ -190,6 +424,11 @@ func (a *Agent) Loop(ctx context.Context) error {
 		}
 
 		choice := resp.Choices[0]
+
+		// 调试：打印 finish_reason 和 tool_calls 数量
+		if a.Debug {
+			fmt.Printf("\n[DEBUG] finish_reason: %s, tool_calls: %d\n", choice.FinishReason, len(choice.Message.ToolCalls))
+		}
 
 		// 打印assistant的文本内容
 		if choice.Message.Content != "" {
@@ -208,34 +447,44 @@ func (a *Agent) Loop(ctx context.Context) error {
 		}
 		a.Messages = append(a.Messages, assistantMsg)
 
-		// 处理工具调用
+		// 处理工具调用 - 通过 dispatch map 调度
 		for _, toolCall := range choice.Message.ToolCalls {
-			if toolCall.Function.Name == "bash" {
-				var args struct {
-					Command string `json:"command"`
-				}
-				if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
-					a.emit(OutputError, fmt.Sprintf("Error parsing tool arguments: %v", err))
-					continue
-				}
-
-				a.emit(OutputCommand, args.Command)
-
-				output := runBash(args.Command)
-
-				// 截断输出用于显示
-				displayOutput := output
-				if len(displayOutput) > 1000 {
-					displayOutput = displayOutput[:1000] + "..."
-				}
-				a.emit(OutputResult, displayOutput)
-
-				a.Messages = append(a.Messages, llm.Message{
-					Role:       "tool",
-					Content:    output,
-					ToolCallID: toolCall.ID,
-				})
+			// 解析参数
+			var args map[string]interface{}
+			if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+				a.emit(OutputError, fmt.Sprintf("Error parsing tool arguments: %v", err))
+				continue
 			}
+
+			// 显示命令
+			displayArgs := toolCall.Function.Arguments
+			if len(displayArgs) > 100 {
+				displayArgs = displayArgs[:100] + "..."
+			}
+			a.emit(OutputCommand, fmt.Sprintf("%s(%s)", toolCall.Function.Name, displayArgs))
+
+			// 通过 dispatch map 查找处理函数
+			handler, exists := a.toolHandlers[toolCall.Function.Name]
+			var output string
+			if !exists {
+				output = fmt.Sprintf("Unknown tool: %s", toolCall.Function.Name)
+			} else {
+				output = handler(args)
+			}
+
+			// 截断输出用于显示
+			displayOutput := output
+			if len(displayOutput) > 1000 {
+				displayOutput = displayOutput[:1000] + "..."
+			}
+			a.emit(OutputResult, displayOutput)
+
+			// 添加工具结果到消息历史
+			a.Messages = append(a.Messages, llm.Message{
+				Role:       "tool",
+				Content:    output,
+				ToolCallID: toolCall.ID,
+			})
 		}
 	}
 }

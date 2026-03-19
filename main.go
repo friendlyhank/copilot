@@ -329,12 +329,23 @@ func (m *Model) handleCommand(input string) (tea.Model, tea.Cmd) {
 
 // handleMessage 处理消息
 func (m *Model) handleMessage(input string) (tea.Model, tea.Cmd) {
-	systemPrompt := fmt.Sprintf(
-		"You are a coding agent at %s. Use bash tool to solve tasks. Be concise.",
-		m.cwd,
-	)
+	systemPrompt := fmt.Sprintf(`You are a coding agent at %s.
+
+IMPORTANT: You MUST use the provided tools (function calls) to perform actions. Do NOT write code blocks or scripts.
+
+Available tools:
+- read_file(path): Read file contents. Use this to read any file.
+- write_file(path, content): Write content to file.
+- edit_file(path, old_text, new_text): Replace text in file.
+- bash(command): Run a shell command.
+
+When asked to read a file, call: read_file with the path argument.
+When asked to write a file, call: write_file with path and content arguments.
+When asked to run a command, call: bash with the command argument.
+
+Act directly through tool calls. Do not explain what you would do - just do it.`, m.cwd)
 	if m.thinking {
-		systemPrompt += " Think step by step."
+		systemPrompt += "\n\nThink step by step before each tool call."
 	}
 
 	m.ag = agent.NewAgent(m.client, systemPrompt)
