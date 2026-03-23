@@ -72,12 +72,9 @@ func (m *Model) handleMessage(input string) (tea.Model, tea.Cmd) {
 	// 保存当前输入
 	m.currentInput = input
 
-	systemPrompt := fmt.Sprintf(
-		"You are a coding agent at %s. Use bash tool to solve tasks. Be concise.",
-		m.cwd,
-	)
+	systemPrompt := fmt.Sprintf("You are a coding agent at %s. Use tools to solve tasks. Act, don't explain.", m.cwd)
 	if m.thinking {
-		systemPrompt += " Think step by step."
+
 	}
 
 	// 创建 Agent
