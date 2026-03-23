@@ -4,22 +4,29 @@ import "time"
 
 // ToolCall 工具调用
 type ToolCall struct {
-	ID        string `json:"id"`
+	ID       string          `json:"id"`
+	Type     string          `json:"type"`
+	Function FunctionCall    `json:"function"`
+	Result   string          `json:"result,omitempty"`
+	Status   string          `json:"status,omitempty"` // pending, running, success, error
+}
+
+// FunctionCall 函数调用
+type FunctionCall struct {
 	Name      string `json:"name"`
-	Type      string `json:"type"`
 	Arguments string `json:"arguments"`
-	Result    string `json:"result,omitempty"`
-	Status    string `json:"status,omitempty"` // pending, running, success, error
 }
 
 // NewToolCall 创建工具调用
 func NewToolCall(name, arguments string) ToolCall {
 	return ToolCall{
-		ID:        generateID(),
-		Name:      name,
-		Type:      "function",
-		Arguments: arguments,
-		Status:    "pending",
+		ID:   generateID(),
+		Type: "function",
+		Function: FunctionCall{
+			Name:      name,
+			Arguments: arguments,
+		},
+		Status: "pending",
 	}
 }
 
@@ -28,6 +35,16 @@ func (t ToolCall) WithResult(result string, status string) ToolCall {
 	t.Result = result
 	t.Status = status
 	return t
+}
+
+// GetName 获取工具名称（便捷方法）
+func (t ToolCall) GetName() string {
+	return t.Function.Name
+}
+
+// GetArguments 获取参数（便捷方法）
+func (t ToolCall) GetArguments() string {
+	return t.Function.Arguments
 }
 
 // ToolDefinition 工具定义

@@ -133,13 +133,14 @@ func (a *Agent) Loop(ctx context.Context) error {
 			result, err := a.executeTool(ctx, toolCall)
 			if err != nil {
 				a.logger.Error("tool execution failed",
-					logger.F("tool", toolCall.Name),
+					logger.F("tool", toolCall.GetName()),
 					logger.F("error", err),
 				)
 			}
 
 			// 添加工具结果消息到会话
-			toolMsg := entity.NewMessage(entity.RoleTool, result.Content)
+			toolMsg := entity.NewMessage(entity.RoleTool, result.Content).
+				WithToolCallID(result.ToolCallID)
 			a.session.AddMessage(toolMsg)
 		}
 	}
@@ -181,7 +182,7 @@ func (a *Agent) buildMessages() []entity.Message {
 // executeTool 执行工具
 func (a *Agent) executeTool(ctx context.Context, call entity.ToolCall) (entity.ToolResult, error) {
 	// 输出命令
-	a.emit(OutputCommand, call.Arguments)
+	a.emit(OutputCommand, call.GetArguments())
 
 	// 执行工具
 	result, err := a.toolReg.ExecuteTool(ctx, call)

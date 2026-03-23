@@ -70,12 +70,12 @@ func (r *Registry) ToLLMTools() []port.ToolDefinition {
 
 // ExecuteTool 执行工具调用
 func (r *Registry) ExecuteTool(ctx context.Context, call entity.ToolCall) (entity.ToolResult, error) {
-	tool, ok := r.Get(call.Name)
+	tool, ok := r.Get(call.GetName())
 	if !ok {
-		return entity.ToolResult{}, errors.New(errors.CodeToolNotFound, "tool not found: "+call.Name)
+		return entity.ToolResult{}, errors.New(errors.CodeToolNotFound, "tool not found: "+call.GetName())
 	}
 
-	output, err := tool.Execute(ctx, call.Arguments)
+	output, err := tool.Execute(ctx, call.GetArguments())
 	if err != nil {
 		return entity.ToolResult{
 			ToolCallID: call.ID,

@@ -35,8 +35,8 @@ func TestMessageWithToolCalls(t *testing.T) {
 	if len(msg.ToolCalls) != 1 {
 		t.Errorf("expected 1 tool call, got %d", len(msg.ToolCalls))
 	}
-	if msg.ToolCalls[0].Name != "bash" {
-		t.Errorf("expected tool name 'bash', got '%s'", msg.ToolCalls[0].Name)
+	if msg.ToolCalls[0].GetName() != "bash" {
+		t.Errorf("expected tool name 'bash', got '%s'", msg.ToolCalls[0].GetName())
 	}
 }
 
@@ -107,11 +107,11 @@ func TestSessionLastMessage(t *testing.T) {
 func TestNewToolCall(t *testing.T) {
 	call := entity.NewToolCall("bash", "ls -la")
 
-	if call.Name != "bash" {
-		t.Errorf("expected name 'bash', got '%s'", call.Name)
+	if call.GetName() != "bash" {
+		t.Errorf("expected name 'bash', got '%s'", call.GetName())
 	}
-	if call.Arguments != "ls -la" {
-		t.Errorf("expected arguments 'ls -la', got '%s'", call.Arguments)
+	if call.GetArguments() != "ls -la" {
+		t.Errorf("expected arguments 'ls -la', got '%s'", call.GetArguments())
 	}
 	if call.Status != "pending" {
 		t.Errorf("expected status 'pending', got '%s'", call.Status)

@@ -135,15 +135,26 @@ func (c *BaseClient) buildLLMRequest(req *port.ChatRequest) interface{} {
 		if len(msg.ToolCalls) > 0 {
 			messages[i]["tool_calls"] = msg.ToolCalls
 		}
+		if msg.ToolCallID != "" {
+			messages[i]["tool_call_id"] = msg.ToolCallID
+		}
 	}
 
-	return map[string]interface{}{
+	// 构建请求
+	result := map[string]interface{}{
 		"model":       req.Model,
 		"messages":    messages,
 		"stream":      req.Stream,
 		"max_tokens":  req.MaxTokens,
 		"temperature": req.Temperature,
 	}
+
+	// 添加工具定义
+	if len(req.Tools) > 0 {
+		result["tools"] = req.Tools
+	}
+
+	return result
 }
 
 // setHeaders 设置请求头（可被子类覆盖）

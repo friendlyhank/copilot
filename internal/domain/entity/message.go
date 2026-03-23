@@ -14,11 +14,12 @@ const (
 
 // Message 消息实体
 type Message struct {
-	ID        string     `json:"id"`
-	Role      Role       `json:"role"`
-	Content   string     `json:"content"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
-	Timestamp time.Time  `json:"timestamp"`
+	ID         string     `json:"id"`
+	Role       Role       `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"` // 工具结果消息需要此字段
+	Timestamp  time.Time  `json:"timestamp"`
 }
 
 // NewMessage 创建新消息
@@ -34,6 +35,12 @@ func NewMessage(role Role, content string) Message {
 // WithToolCalls 添加工具调用
 func (m Message) WithToolCalls(calls []ToolCall) Message {
 	m.ToolCalls = calls
+	return m
+}
+
+// WithToolCallID 设置工具调用ID
+func (m Message) WithToolCallID(id string) Message {
+	m.ToolCallID = id
 	return m
 }
 
