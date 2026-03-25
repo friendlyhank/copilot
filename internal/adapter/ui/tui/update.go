@@ -199,17 +199,17 @@ func (m *Model) handleAgentOutput(msg agentOutputMsg) (tea.Model, tea.Cmd) {
 			if lastMsg.Type == usecase.OutputTextChunk {
 				lastMsg.Content += msg.Content
 			} else {
-				// 新的文本片段，添加 🤖 前缀
+				// 新的文本片段
 				m.messages = append(m.messages, UIMessage{
 					Type:    usecase.OutputTextChunk,
-					Content: "🤖 " + msg.Content,
+					Content: msg.Content,
 				})
 			}
 		} else {
 			// 第一条消息
 			m.messages = append(m.messages, UIMessage{
 				Type:    usecase.OutputTextChunk,
-				Content: "🤖 " + msg.Content,
+				Content: msg.Content,
 			})
 		}
 	} else {

@@ -258,12 +258,15 @@ func (c *BaseClient) parseStreamResponse(reader io.Reader, handler port.StreamHa
 		// 记录原始行内容
 		c.logger.Debug("SSE line", logger.F("content", line))
 
-		// SSE 格式: "data: {...}"
-		if !strings.HasPrefix(line, "data: ") {
+		// SSE 格式: "data: {...}" 或 "data:{...}" (兼容有无空格)
+		var data string
+		if strings.HasPrefix(line, "data: ") {
+			data = strings.TrimPrefix(line, "data: ")
+		} else if strings.HasPrefix(line, "data:") {
+			data = strings.TrimPrefix(line, "data:")
+		} else {
 			continue
 		}
-
-		data := strings.TrimPrefix(line, "data: ")
 
 		// 流结束标记
 		if data == "[DONE]" {
