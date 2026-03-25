@@ -245,6 +245,8 @@ func (c *BaseClient) ChatStream(ctx context.Context, req *port.ChatRequest, hand
 // parseStreamResponse 解析 SSE 流式响应
 func (c *BaseClient) parseStreamResponse(reader io.Reader, handler port.StreamHandler) error {
 	scanner := bufio.NewScanner(reader)
+	var responseChunks []map[string]any // 收集解析后的 chunk 用于日志
+
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -262,7 +264,7 @@ func (c *BaseClient) parseStreamResponse(reader io.Reader, handler port.StreamHa
 
 		// 流结束标记
 		if data == "[DONE]" {
-			return nil
+			break
 		}
 
 		// 解析 chunk
@@ -272,10 +274,40 @@ func (c *BaseClient) parseStreamResponse(reader io.Reader, handler port.StreamHa
 			continue
 		}
 
+		// 收集用于日志
+		responseChunks = append(responseChunks, map[string]any{
+			"id":        chunk.ID,
+			"model":     chunk.Model,
+			"choices":   chunk.Choices,
+			"tool_calls": chunk.ToolCalls,
+		})
+
 		// 调用 handler 处理 chunk
 		if err := handler(&chunk); err != nil {
 			return fmt.Errorf("stream handler error: %w", err)
 		}
+	}
+
+	// 记录流式响应摘要
+	if len(responseChunks) > 0 {
+		// 提取最终内容摘要
+		var contentBuilder strings.Builder
+		var toolCalls []port.StreamToolCall
+		for _, ch := range responseChunks {
+			if choices, ok := ch["choices"].([]port.StreamChoice); len(choices) > 0 && ok {
+				if choices[0].Delta.Content != "" {
+					contentBuilder.WriteString(choices[0].Delta.Content)
+				}
+				if len(choices[0].Delta.ToolCalls) > 0 {
+					toolCalls = append(toolCalls, choices[0].Delta.ToolCalls...)
+				}
+			}
+		}
+		c.logger.Debug("Stream Response",
+			logger.F("chunks", len(responseChunks)),
+			logger.F("content_len", contentBuilder.Len()),
+			logger.F("tool_calls", len(toolCalls)),
+		)
 	}
 
 	if err := scanner.Err(); err != nil {
