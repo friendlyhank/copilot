@@ -12,6 +12,9 @@ copilot
 # macOS
 .DS_Store
 
+# Log
+log/
+
 # Go
 *.exe
 *.exe~

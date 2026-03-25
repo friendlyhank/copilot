@@ -41,9 +41,13 @@ type AgentConfig struct {
 
 // LoggerConfig 日志配置
 type LoggerConfig struct {
-	Level  string `yaml:"level"`
-	Output string `yaml:"output"`
-	Format string `yaml:"format"`
+	Level      string `yaml:"level"`       // debug, info, warn, error
+	Output     string `yaml:"output"`      // stdout, stderr, 或文件路径
+	Format     string `yaml:"format"`      // json, text
+	MaxSize    int    `yaml:"max_size"`    // MB, 日志文件最大大小
+	MaxBackups int    `yaml:"max_backups"` // 保留的旧文件数量
+	MaxAge     int    `yaml:"max_age"`     // 保留天数
+	Compress   bool   `yaml:"compress"`    // 是否压缩旧文件
 }
 
 // Load 加载配置（优先级：环境变量 > 配置文件 > 默认值）

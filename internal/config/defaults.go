@@ -19,9 +19,13 @@ func DefaultConfig() *Config {
 			Thinking:    true,
 		},
 		Logger: LoggerConfig{
-			Level:  "info",
-			Output: "stderr",
-			Format: "text",
+			Level:      "info",
+			Output:     "log/copilot.log",
+			Format:     "text",
+			MaxSize:    100,
+			MaxBackups: 3,
+			MaxAge:     30,
+			Compress:   true,
 		},
 	}
 }

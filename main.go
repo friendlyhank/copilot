@@ -30,7 +30,15 @@ func main() {
 	}
 
 	// 初始化日志
-	log := logger.New(cfg.Logger.Level, cfg.Logger.Output, cfg.Logger.Format)
+	log := logger.New(logger.Config{
+		Level:      cfg.Logger.Level,
+		Output:     cfg.Logger.Output,
+		Format:     cfg.Logger.Format,
+		MaxSize:    cfg.Logger.MaxSize,
+		MaxBackups: cfg.Logger.MaxBackups,
+		MaxAge:     cfg.Logger.MaxAge,
+		Compress:   cfg.Logger.Compress,
+	})
 	logger.SetDefault(log)
 
 	// 创建 LLM 客户端

@@ -1,46 +1,22 @@
 package logger
 
 import (
-	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"sync"
+
+	"gopkg.in/natefinch/lumberjack.v2"
 )
-
-// Level 日志级别
-type Level int
-
-const (
-	LevelDebug Level = iota
-	LevelInfo
-	LevelWarn
-	LevelError
-)
-
-func (l Level) String() string {
-	switch l {
-	case LevelDebug:
-		return "DEBUG"
-	case LevelInfo:
-		return "INFO"
-	case LevelWarn:
-		return "WARN"
-	case LevelError:
-		return "ERROR"
-	default:
-		return "UNKNOWN"
-	}
-}
 
 // Field 日志字段
 type Field struct {
 	Key   string
-	Value interface{}
+	Value any
 }
 
 // F 创建字段快捷方式
-func F(key string, value interface{}) Field {
+func F(key string, value any) Field {
 	return Field{Key: key, Value: value}
 }
 
@@ -50,134 +26,159 @@ type Logger interface {
 	Info(msg string, fields ...Field)
 	Warn(msg string, fields ...Field)
 	Error(msg string, fields ...Field)
-	
+
 	With(fields ...Field) Logger
 	WithPrefix(prefix string) Logger
 }
 
-// stdLogger 标准日志实现
-type stdLogger struct {
-	mu     sync.Mutex
-	level  Level
-	out    io.Writer
-	prefix string
-	fields []Field
+// slogLogger slog 实现
+type slogLogger struct {
+	logger *slog.Logger
 }
 
 var (
-	defaultLogger *stdLogger
+	defaultLogger Logger
 	once          sync.Once
 )
 
+// Config 日志配置
+type Config struct {
+	Level      string // debug, info, warn, error
+	Output     string // stdout, stderr, 或文件路径
+	Format     string // json, text
+	MaxSize    int    // MB, 日志文件最大大小
+	MaxBackups int    // 保留的旧文件数量
+	MaxAge     int    // 保留天数
+	Compress   bool   // 是否压缩旧文件
+}
+
 // New 创建日志实例
-func New(level, output, format string) Logger {
-	var l Level
-	switch level {
-	case "debug":
-		l = LevelDebug
-	case "info":
-		l = LevelInfo
-	case "warn":
-		l = LevelWarn
-	case "error":
-		l = LevelError
-	default:
-		l = LevelInfo
+func New(cfg Config) Logger {
+	// 解析日志级别
+	level := parseLevel(cfg.Level)
+
+	// 创建输出 writer
+	writer := createWriter(cfg)
+
+	// 创建 handler
+	opts := &slog.HandlerOptions{Level: level}
+	var handler slog.Handler
+	if cfg.Format == "json" {
+		handler = slog.NewJSONHandler(writer, opts)
+	} else {
+		handler = slog.NewTextHandler(writer, opts)
 	}
 
-	var out io.Writer
-	switch output {
-	case "stdout":
-		out = os.Stdout
-	case "stderr", "":
-		out = os.Stderr
+	return &slogLogger{
+		logger: slog.New(handler),
+	}
+}
+
+// parseLevel 解析日志级别
+func parseLevel(level string) slog.Level {
+	switch level {
+	case "debug":
+		return slog.LevelDebug
+	case "info":
+		return slog.LevelInfo
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
 	default:
-		f, err := os.OpenFile(output, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			out = os.Stderr
-		} else {
-			out = f
+		return slog.LevelInfo
+	}
+}
+
+// createWriter 创建输出 writer
+func createWriter(cfg Config) io.Writer {
+	var writer io.Writer
+
+	switch cfg.Output {
+	case "stdout":
+		writer = os.Stdout
+	case "stderr", "":
+		writer = os.Stderr
+	default:
+		// 文件输出，使用 lumberjack 支持轮转
+		maxSize := cfg.MaxSize
+		if maxSize <= 0 {
+			maxSize = 100 // 默认 100MB
+		}
+		maxBackups := cfg.MaxBackups
+		if maxBackups <= 0 {
+			maxBackups = 3 // 默认保留 3 个备份
+		}
+		maxAge := cfg.MaxAge
+		if maxAge <= 0 {
+			maxAge = 30 // 默认保留 30 天
+		}
+
+		writer = &lumberjack.Logger{
+			Filename:   cfg.Output,
+			MaxSize:    maxSize,
+			MaxBackups: maxBackups,
+			MaxAge:     maxAge,
+			Compress:   cfg.Compress,
 		}
 	}
 
-	return &stdLogger{
-		level: l,
-		out:   out,
-	}
+	return writer
 }
 
 // Default 获取默认日志实例
 func Default() Logger {
 	once.Do(func() {
-		defaultLogger = &stdLogger{
-			level: LevelInfo,
-			out:   os.Stderr,
-		}
+		defaultLogger = New(Config{
+			Level:  "info",
+			Output: "stderr",
+			Format: "text",
+		})
 	})
 	return defaultLogger
 }
 
 // SetDefault 设置默认日志实例
 func SetDefault(l Logger) {
-	if sl, ok := l.(*stdLogger); ok {
-		defaultLogger = sl
+	defaultLogger = l
+}
+
+// fieldsToAttrs 将 Field 转换为 slog.Attr
+func fieldsToAttrs(fields ...Field) []any {
+	attrs := make([]any, len(fields)*2)
+	for i, f := range fields {
+		attrs[i*2] = f.Key
+		attrs[i*2+1] = f.Value
+	}
+	return attrs
+}
+
+func (l *slogLogger) Debug(msg string, fields ...Field) {
+	l.logger.Debug(msg, fieldsToAttrs(fields...)...)
+}
+
+func (l *slogLogger) Info(msg string, fields ...Field) {
+	l.logger.Info(msg, fieldsToAttrs(fields...)...)
+}
+
+func (l *slogLogger) Warn(msg string, fields ...Field) {
+	l.logger.Warn(msg, fieldsToAttrs(fields...)...)
+}
+
+func (l *slogLogger) Error(msg string, fields ...Field) {
+	l.logger.Error(msg, fieldsToAttrs(fields...)...)
+}
+
+func (l *slogLogger) With(fields ...Field) Logger {
+	attrs := fieldsToAttrs(fields...)
+	return &slogLogger{
+		logger: l.logger.With(attrs...),
 	}
 }
 
-func (l *stdLogger) log(level Level, msg string, fields ...Field) {
-	if level < l.level {
-		return
-	}
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	allFields := append(l.fields, fields...)
-	
-	fieldStr := ""
-	for _, f := range allFields {
-		fieldStr += fmt.Sprintf(" %s=%v", f.Key, f.Value)
-	}
-
-	prefix := l.prefix
-	if prefix != "" {
-		prefix = "[" + prefix + "] "
-	}
-
-	log.New(l.out, "", log.LstdFlags).Printf("[%s] %s%s%s\n", level, prefix, msg, fieldStr)
-}
-
-func (l *stdLogger) Debug(msg string, fields ...Field) {
-	l.log(LevelDebug, msg, fields...)
-}
-
-func (l *stdLogger) Info(msg string, fields ...Field) {
-	l.log(LevelInfo, msg, fields...)
-}
-
-func (l *stdLogger) Warn(msg string, fields ...Field) {
-	l.log(LevelWarn, msg, fields...)
-}
-
-func (l *stdLogger) Error(msg string, fields ...Field) {
-	l.log(LevelError, msg, fields...)
-}
-
-func (l *stdLogger) With(fields ...Field) Logger {
-	return &stdLogger{
-		level:  l.level,
-		out:    l.out,
-		prefix: l.prefix,
-		fields: append(l.fields, fields...),
-	}
-}
-
-func (l *stdLogger) WithPrefix(prefix string) Logger {
-	return &stdLogger{
-		level:  l.level,
-		out:    l.out,
-		prefix: prefix,
-		fields: l.fields,
+func (l *slogLogger) WithPrefix(prefix string) Logger {
+	return &slogLogger{
+		logger: l.logger.With("component", prefix),
 	}
 }
 
