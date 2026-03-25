@@ -35,6 +35,7 @@ type AgentConfig struct {
 	MaxTokens   int
 	Temperature float64
 	Thinking    bool
+	UseStream   bool // 是否使用流式模式
 }
 
 // Agent Agent 用例
@@ -50,6 +51,11 @@ type Agent struct {
 
 // NewAgent 创建 Agent
 func NewAgent(llmClient port.LLMClient, toolReg port.ToolRegistry, session *entity.Session, config AgentConfig) *Agent {
+	// 默认开启流式
+	if config.MaxTokens == 0 {
+		config.MaxTokens = 8000
+	}
+	
 	return &Agent{
 		llmClient: llmClient,
 		toolReg:   toolReg,
@@ -96,40 +102,28 @@ func (a *Agent) Loop(ctx context.Context) error {
 		default:
 		}
 
-		// 调用 LLM
-		resp, err := a.callLLM(ctx)
+		// 使用流式调用
+		content, toolCalls, err := a.callLLMStream(ctx)
 		if err != nil {
 			a.emit(OutputError, fmt.Sprintf("API call failed: %v", err))
 			return err
 		}
 
-		if len(resp.Choices) == 0 {
-			a.emit(OutputError, "no response from LLM")
-			return errors.New(errors.CodeAgentError, "no choices in response")
-		}
-
-		choice := resp.Choices[0]
-
-		// 输出 assistant 的文本内容
-		if choice.Message.Content != "" {
-			a.emit(OutputText, choice.Message.Content)
-		}
-
 		// 如果没有工具调用，循环结束
-		if len(choice.Message.ToolCalls) == 0 {
+		if len(toolCalls) == 0 {
 			// 添加 assistant 消息到会话
-			assistantMsg := entity.NewMessage(entity.RoleAssistant, choice.Message.Content)
+			assistantMsg := entity.NewMessage(entity.RoleAssistant, content)
 			a.session.AddMessage(assistantMsg)
 			return nil
 		}
 
 		// 添加 assistant 消息到会话
-		assistantMsg := entity.NewMessage(entity.RoleAssistant, choice.Message.Content).
-			WithToolCalls(choice.Message.ToolCalls)
+		assistantMsg := entity.NewMessage(entity.RoleAssistant, content).
+			WithToolCalls(toolCalls)
 		a.session.AddMessage(assistantMsg)
 
 		// 处理工具调用
-		for _, toolCall := range choice.Message.ToolCalls {
+		for _, toolCall := range toolCalls {
 			result, err := a.executeTool(ctx, toolCall)
 			if err != nil {
 				a.logger.Error("tool execution failed",
@@ -146,8 +140,8 @@ func (a *Agent) Loop(ctx context.Context) error {
 	}
 }
 
-// callLLM 调用 LLM
-func (a *Agent) callLLM(ctx context.Context) (*port.ChatResponse, error) {
+// callLLMStream 流式调用 LLM
+func (a *Agent) callLLMStream(ctx context.Context) (string, []entity.ToolCall, error) {
 	// 构建消息
 	messages := a.buildMessages()
 
@@ -155,13 +149,63 @@ func (a *Agent) callLLM(ctx context.Context) (*port.ChatResponse, error) {
 	req := &port.ChatRequest{
 		Model:       a.llmClient.GetModel(),
 		Messages:    messages,
-		Stream:      false,
+		Stream:      true,
 		MaxTokens:   a.config.MaxTokens,
 		Temperature: a.config.Temperature,
 		Tools:       a.toolReg.ToLLMTools(),
 	}
 
-	return a.llmClient.Chat(ctx, req)
+	var contentBuilder string
+	var toolCallsMap = make(map[int]*entity.ToolCall)
+
+	err := a.llmClient.ChatStream(ctx, req, func(chunk *port.StreamChunk) error {
+		if len(chunk.Choices) == 0 {
+			return nil
+		}
+
+		choice := chunk.Choices[0]
+		delta := choice.Delta
+
+		// 累积文本内容并实时输出
+		if delta.Content != "" {
+			contentBuilder += delta.Content
+			a.emit(OutputText, delta.Content)
+		}
+
+		// 累积工具调用
+		for _, tc := range delta.ToolCalls {
+			idx := tc.Index
+
+			if tc.ID != "" {
+				// 新的工具调用
+				toolCallsMap[idx] = &entity.ToolCall{
+					ID:   tc.ID,
+					Type: tc.Type,
+					Function: entity.FunctionCall{
+						Name:      tc.Function.Name,
+						Arguments: tc.Function.Arguments,
+					},
+				}
+			} else if existing, ok := toolCallsMap[idx]; ok {
+				// 累积到现有的工具调用
+				existing.Function.Arguments += tc.Function.Arguments
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return "", nil, err
+	}
+
+	// 按 index 排序转换为切片
+	toolCalls := make([]entity.ToolCall, len(toolCallsMap))
+	for idx, tc := range toolCallsMap {
+		toolCalls[idx] = *tc
+	}
+
+	return contentBuilder, toolCalls, nil
 }
 
 // buildMessages 构建消息列表

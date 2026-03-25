@@ -7,10 +7,16 @@ import (
 	"ai_code/internal/domain/entity"
 )
 
+// StreamHandler 流式响应处理器
+type StreamHandler func(chunk *StreamChunk) error
+
 // LLMClient LLM 客户端端口接口
 type LLMClient interface {
-	// Chat 发送聊天请求
+	// Chat 发送聊天请求（非流式）
 	Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error)
+
+	// ChatStream 发送流式聊天请求
+	ChatStream(ctx context.Context, req *ChatRequest, handler StreamHandler) error
 
 	// GetName 获取提供商名称
 	GetName() string
@@ -37,12 +43,13 @@ type ChatRequest struct {
 
 // ChatResponse 聊天响应
 type ChatResponse struct {
-	ID      string   `json:"id"`
-	Object  string   `json:"object"`
-	Created int64    `json:"created"`
-	Model   string   `json:"model"`
-	Choices []Choice `json:"choices"`
-	Usage   Usage    `json:"usage"`
+	ID        string          `json:"id"`
+	Object    string          `json:"object"`
+	Created   int64           `json:"created"`
+	Model     string          `json:"model"`
+	Choices   []Choice        `json:"choices"`
+	Usage     Usage           `json:"usage"`
+	ToolCalls []entity.ToolCall `json:"tool_calls,omitempty"` // iFlow 返回在根级别
 }
 
 // Choice 选择项
@@ -64,6 +71,46 @@ type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+}
+
+// StreamChunk 流式响应的 chunk
+type StreamChunk struct {
+	ID      string          `json:"id"`
+	Object  string          `json:"object"`
+	Created int64           `json:"created"`
+	Model   string          `json:"model"`
+	Choices []StreamChoice  `json:"choices"`
+	Usage   *Usage          `json:"usage,omitempty"`
+	// iFlow 兼容：根级别的 tool_calls
+	ToolCalls []entity.ToolCall `json:"tool_calls,omitempty"`
+}
+
+// StreamChoice 流式响应的选择项
+type StreamChoice struct {
+	Index        int          `json:"index"`
+	Delta        StreamDelta  `json:"delta"`
+	FinishReason string       `json:"finish_reason"`
+}
+
+// StreamDelta 流式响应的增量内容
+type StreamDelta struct {
+	Role      string          `json:"role,omitempty"`
+	Content   string          `json:"content,omitempty"`
+	ToolCalls []StreamToolCall `json:"tool_calls,omitempty"`
+}
+
+// StreamToolCall 流式响应中的工具调用（包含 index）
+type StreamToolCall struct {
+	Index    int                    `json:"index"`
+	ID       string                 `json:"id"`
+	Type     string                 `json:"type"`
+	Function StreamFunctionCall     `json:"function"`
+}
+
+// StreamFunctionCall 流式响应中的函数调用
+type StreamFunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 // ToolDefinition 工具定义

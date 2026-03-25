@@ -1,12 +1,14 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"ai_code/internal/domain/errors"
@@ -169,6 +171,12 @@ func (c *BaseClient) parseResponse(body []byte) (*port.ChatResponse, error) {
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
+
+	// iFlow 兼容：将根级别的 ToolCalls 合并到 message 中
+	if len(resp.ToolCalls) > 0 && len(resp.Choices) > 0 {
+		resp.Choices[0].Message.ToolCalls = resp.ToolCalls
+	}
+
 	return &resp, nil
 }
 
@@ -198,4 +206,98 @@ func (c *BaseClient) SetModel(model string) {
 // SetDebug 设置调试模式
 func (c *BaseClient) SetDebug(debug bool) {
 	c.debug = debug
+}
+
+// ChatStream 发送流式聊天请求
+func (c *BaseClient) ChatStream(ctx context.Context, req *port.ChatRequest, handler port.StreamHandler) error {
+	// 确保模型名称设置
+	if req.Model == "" {
+		req.Model = c.model
+	}
+
+	// 强制设置为流式
+	req.Stream = true
+
+	// 转换消息格式
+	llmReq := c.buildLLMRequest(req)
+
+	body, err := json.Marshal(llmReq)
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
+
+	// 调试模式打印请求
+	if c.debug {
+		c.printDebug("Stream Request", body, "\033[34m")
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	c.setHeaders(httpReq)
+	// 流式请求需要接受 text/event-stream
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("do request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return errors.APIError(
+			"API request failed",
+			resp.StatusCode,
+			fmt.Errorf("%s", string(respBody)),
+		)
+	}
+
+	// 解析 SSE 流
+	return c.parseStreamResponse(resp.Body, handler)
+}
+
+// parseStreamResponse 解析 SSE 流式响应
+func (c *BaseClient) parseStreamResponse(reader io.Reader, handler port.StreamHandler) error {
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// 跳过空行
+		if line == "" {
+			continue
+		}
+
+		// SSE 格式: "data: {...}"
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		data := strings.TrimPrefix(line, "data: ")
+
+		// 流结束标记
+		if data == "[DONE]" {
+			return nil
+		}
+
+		// 解析 chunk
+		var chunk port.StreamChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			c.logger.Warn("failed to parse stream chunk", logger.F("data", data))
+			continue
+		}
+
+		// 调用 handler 处理 chunk
+		if err := handler(&chunk); err != nil {
+			return fmt.Errorf("stream handler error: %w", err)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read stream: %w", err)
+	}
+
+	return nil
 }
