@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -180,12 +181,31 @@ func (c *BaseClient) parseResponse(body []byte) (*port.ChatResponse, error) {
 	return &resp, nil
 }
 
-// printDebug 打印调试信息
+// printDebug 打印调试信息到文件（TUI 模式下终端输出会被覆盖）
 func (c *BaseClient) printDebug(title string, body []byte, color string) {
-	fmt.Printf("\n%s========== %s ==========%s\n", color, title, "\033[0m")
+	// 获取当前工作目录
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+
+	// 创建 log 目录
+	logDir := cwd + "/log"
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return
+	}
+
+	// 写入调试日志文件
+	f, err := os.OpenFile(logDir+"/copilot.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
 	var pretty bytes.Buffer
 	json.Indent(&pretty, body, "", "  ")
-	fmt.Printf("%s%s%s\n", color, pretty.String(), "\033[0m")
+	f.WriteString(fmt.Sprintf("\n========== %s ==========\n", title))
+	f.WriteString(pretty.String() + "\n")
 }
 
 // GetName 获取提供商名称
