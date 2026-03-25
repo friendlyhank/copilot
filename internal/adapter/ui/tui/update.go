@@ -190,10 +190,35 @@ func (m *Model) handleAgentOutput(msg agentOutputMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	m.messages = append(m.messages, UIMessage{
-		Type:    msg.Type,
-		Content: msg.Content,
-	})
+
+	// 流式文本片段：累积到最后一条消息
+	if msg.Type == usecase.OutputTextChunk {
+		if len(m.messages) > 0 {
+			lastMsg := &m.messages[len(m.messages)-1]
+			// 如果最后一条是文本片段，追加内容
+			if lastMsg.Type == usecase.OutputTextChunk {
+				lastMsg.Content += msg.Content
+			} else {
+				// 新的文本片段，添加 🤖 前缀
+				m.messages = append(m.messages, UIMessage{
+					Type:    usecase.OutputTextChunk,
+					Content: "🤖 " + msg.Content,
+				})
+			}
+		} else {
+			// 第一条消息
+			m.messages = append(m.messages, UIMessage{
+				Type:    usecase.OutputTextChunk,
+				Content: "🤖 " + msg.Content,
+			})
+		}
+	} else {
+		m.messages = append(m.messages, UIMessage{
+			Type:    msg.Type,
+			Content: msg.Content,
+		})
+	}
+
 	if m.state == StateProcessing {
 		return m, m.listenOutput()
 	}

@@ -82,8 +82,8 @@ func NewModel(llmClient port.LLMClient, session *entity.Session, toolReg port.To
 		toolReg:   toolReg,
 		messages:  []UIMessage{},
 		availableModels: []string{
-			"qwen3-coder-plus",
 			"qwen3-max",
+			"qwen3-coder-plus",
 			"kimi-k2-0905",
 			"deepseek-v3.2",
 		},

@@ -5,7 +5,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		LLM: LLMConfig{
 			Provider: "iflow",
-			Model:    "qwen3-coder-plus",
+			Model:    "qwen3-max",
 			Timeout:  180,
 		},
 		UI: UIConfig{
@@ -31,8 +31,8 @@ func DefaultConfig() *Config {
 
 // AvailableModels 可用模型列表
 var AvailableModels = []string{
-	"qwen3-coder-plus",
 	"qwen3-max",
+	"qwen3-coder-plus",
 	"kimi-k2-0905",
 	"deepseek-v3.2",
 }

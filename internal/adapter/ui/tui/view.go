@@ -147,6 +147,9 @@ func (m *Model) renderMessage(msg UIMessage) string {
 			return m.styles.User.Render("> " + strings.TrimPrefix(msg.Content, "You: "))
 		}
 		return m.styles.Assistant.Render("🤖 " + msg.Content)
+	case usecase.OutputTextChunk:
+		// 流式文本片段，直接输出（前缀已在 update 中添加）
+		return m.styles.Assistant.Render(msg.Content)
 	case usecase.OutputCommand:
 		return m.styles.Command.Render("⚡ $ " + msg.Content)
 	case usecase.OutputResult:

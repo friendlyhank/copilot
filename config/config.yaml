@@ -3,7 +3,7 @@
 
 llm:
   provider: iflow          # LLM 提供商: iflow, openai
-  model: qwen3-coder-plus  # 使用的模型
+  model: qwen3-max         # 使用的模型
   timeout: 180             # 请求超时时间(秒)
 
 ui:

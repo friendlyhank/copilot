@@ -15,6 +15,7 @@ type OutputType int
 
 const (
 	OutputText OutputType = iota
+	OutputTextChunk // 流式文本片段（不加前缀，追加显示）
 	OutputCommand
 	OutputResult
 	OutputError
@@ -169,25 +170,34 @@ func (a *Agent) callLLMStream(ctx context.Context) (string, []entity.ToolCall, e
 		// 累积文本内容并实时输出
 		if delta.Content != "" {
 			contentBuilder += delta.Content
-			a.emit(OutputText, delta.Content)
+			a.emit(OutputTextChunk, delta.Content)
 		}
 
 		// 累积工具调用
 		for _, tc := range delta.ToolCalls {
 			idx := tc.Index
 
-			if tc.ID != "" {
-				// 新的工具调用
+			// 确保索引位置存在
+			if toolCallsMap[idx] == nil {
 				toolCallsMap[idx] = &entity.ToolCall{
-					ID:   tc.ID,
-					Type: tc.Type,
-					Function: entity.FunctionCall{
-						Name:      tc.Function.Name,
-						Arguments: tc.Function.Arguments,
-					},
+					Type: "function",
+					Function: entity.FunctionCall{},
 				}
-			} else if existing, ok := toolCallsMap[idx]; ok {
-				// 累积到现有的工具调用
+			}
+
+			existing := toolCallsMap[idx]
+
+			// 更新非空字段
+			if tc.ID != "" {
+				existing.ID = tc.ID
+			}
+			if tc.Type != "" {
+				existing.Type = tc.Type
+			}
+			if tc.Function.Name != "" {
+				existing.Function.Name = tc.Function.Name
+			}
+			if tc.Function.Arguments != "" {
 				existing.Function.Arguments += tc.Function.Arguments
 			}
 		}
