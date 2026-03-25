@@ -4,7 +4,7 @@
 APP_NAME := copilot
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 BUILD_DIR := bin
-CMD_DIR := cmd/ai_code
+CMD_DIR := .
 
 # Go 相关
 GOCMD := go
