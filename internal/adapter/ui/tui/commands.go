@@ -50,6 +50,14 @@ Tips:
 		})
 	case cmd == "/clear":
 		m.messages = []UIMessage{}
+		if m.session != nil {
+			m.session.Clear()
+		}
+		if todoTool, ok := m.toolReg.Get("todo_write"); ok {
+			if resetter, ok := todoTool.(interface{ Reset() }); ok {
+				resetter.Reset()
+			}
+		}
 	case cmd == "/q", cmd == "/quit", cmd == "/exit":
 		m.quitting = true
 		return m, tea.Quit
@@ -72,7 +80,7 @@ func (m *Model) handleMessage(input string) (tea.Model, tea.Cmd) {
 	// 保存当前输入
 	m.currentInput = input
 
-	systemPrompt := fmt.Sprintf("You are a coding agent at %s. Use tools to solve tasks. Act, don't explain.", m.cwd)
+	systemPrompt := fmt.Sprintf("You are a coding agent at %s. Use the todo_write tool to plan multi-step tasks. Mark in_progress before starting, completed when done. Prefer tools over prose.", m.cwd)
 	if m.thinking {
 
 	}

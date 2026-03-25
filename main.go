@@ -54,8 +54,6 @@ func main() {
 		os.Exit(1)
 	}
 
-
-
 	// 获取工作目录
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -78,6 +76,7 @@ func main() {
 	toolReg.Register(tool.NewEditFileTool(
 		tool.WithEditFileCWD(cwd),
 	))
+	toolReg.Register(tool.NewTodoWriteTool())
 
 	// 创建会话
 	session := entity.NewSession(cfg.LLM.Model, cfg.LLM.Provider)

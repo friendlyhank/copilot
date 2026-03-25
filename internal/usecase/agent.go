@@ -14,8 +14,8 @@ import (
 type OutputType int
 
 const (
-	OutputText OutputType = iota
-	OutputTextChunk // 流式文本片段（不加前缀，追加显示）
+	OutputText      OutputType = iota
+	OutputTextChunk            // 流式文本片段（不加前缀，追加显示）
 	OutputCommand
 	OutputResult
 	OutputError
@@ -41,13 +41,16 @@ type AgentConfig struct {
 
 // Agent Agent 用例
 type Agent struct {
-	llmClient port.LLMClient
-	toolReg   port.ToolRegistry
-	session   *entity.Session
-	config    AgentConfig
-	logger    logger.Logger
-	handler   OutputHandler
-	system    string
+	llmClient    port.LLMClient
+	toolReg      port.ToolRegistry
+	session      *entity.Session
+	config       AgentConfig
+	logger       logger.Logger
+	handler      OutputHandler
+	system       string
+	todoTool     string
+	todoRounds   int
+	todoNagAfter int
 }
 
 // NewAgent 创建 Agent
@@ -56,13 +59,15 @@ func NewAgent(llmClient port.LLMClient, toolReg port.ToolRegistry, session *enti
 	if config.MaxTokens == 0 {
 		config.MaxTokens = 8000
 	}
-	
+
 	return &Agent{
-		llmClient: llmClient,
-		toolReg:   toolReg,
-		session:   session,
-		config:    config,
-		logger:    logger.Default().WithPrefix("agent"),
+		llmClient:    llmClient,
+		toolReg:      toolReg,
+		session:      session,
+		config:       config,
+		logger:       logger.Default().WithPrefix("agent"),
+		todoTool:     "todo_write",
+		todoNagAfter: 3,
 	}
 }
 
@@ -85,6 +90,8 @@ func (a *Agent) emit(outputType OutputType, content string) {
 
 // ProcessMessage 处理用户消息
 func (a *Agent) ProcessMessage(ctx context.Context, input string) error {
+	a.todoRounds = 0
+
 	// 添加用户消息到会话
 	userMsg := entity.NewMessage(entity.RoleUser, input)
 	a.session.AddMessage(userMsg)
@@ -123,8 +130,13 @@ func (a *Agent) Loop(ctx context.Context) error {
 			WithToolCalls(toolCalls)
 		a.session.AddMessage(assistantMsg)
 
-		// 处理工具调用
+		usedTodo := false
+		results := make([]entity.ToolResult, 0, len(toolCalls))
 		for _, toolCall := range toolCalls {
+			if toolCall.GetName() == a.todoTool {
+				usedTodo = true
+			}
+
 			result, err := a.executeTool(ctx, toolCall)
 			if err != nil {
 				a.logger.Error("tool execution failed",
@@ -133,10 +145,15 @@ func (a *Agent) Loop(ctx context.Context) error {
 				)
 			}
 
-			// 添加工具结果消息到会话
+			results = append(results, result)
+		}
+
+		results = a.injectTodoReminder(results, usedTodo)
+		for _, result := range results {
 			toolMsg := entity.NewMessage(entity.RoleTool, result.Content).
 				WithToolCallID(result.ToolCallID)
 			a.session.AddMessage(toolMsg)
+			a.emitToolResult(result)
 		}
 	}
 }
@@ -180,7 +197,7 @@ func (a *Agent) callLLMStream(ctx context.Context) (string, []entity.ToolCall, e
 			// 确保索引位置存在
 			if toolCallsMap[idx] == nil {
 				toolCallsMap[idx] = &entity.ToolCall{
-					Type: "function",
+					Type:     "function",
 					Function: entity.FunctionCall{},
 				}
 			}
@@ -245,14 +262,34 @@ func (a *Agent) executeTool(ctx context.Context, call entity.ToolCall) (entity.T
 		return result, err
 	}
 
-	// 输出结果（截断显示）
+	return result, nil
+}
+
+func (a *Agent) injectTodoReminder(results []entity.ToolResult, usedTodo bool) []entity.ToolResult {
+	if usedTodo {
+		a.todoRounds = 0
+		return results
+	}
+
+	a.todoRounds++
+	if a.todoRounds < a.todoNagAfter {
+		return results
+	}
+
+	if len(results) == 0 {
+		return results
+	}
+
+	results[0].Content = "<reminder>Update your todos.</reminder>\n" + results[0].Content
+	return results
+}
+
+func (a *Agent) emitToolResult(result entity.ToolResult) {
 	displayResult := result.Content
 	if len(displayResult) > 1000 {
 		displayResult = displayResult[:1000] + "..."
 	}
 	a.emit(OutputResult, displayResult)
-
-	return result, nil
 }
 
 // SwitchModel 切换模型
