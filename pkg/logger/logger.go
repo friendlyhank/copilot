@@ -4,6 +4,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -38,7 +39,7 @@ type slogLogger struct {
 
 var (
 	defaultLogger Logger
-	once          sync.Once
+	initOnce      sync.Once
 )
 
 // Config 日志配置
@@ -100,7 +101,13 @@ func createWriter(cfg Config) io.Writer {
 	case "stderr", "":
 		writer = os.Stderr
 	default:
-		// 文件输出，使用 lumberjack 支持轮转
+		// 文件输出，确保目录存在
+		dir := filepath.Dir(cfg.Output)
+		if dir != "" && dir != "." {
+			os.MkdirAll(dir, 0755)
+		}
+
+		// 日志轮转参数
 		maxSize := cfg.MaxSize
 		if maxSize <= 0 {
 			maxSize = 100 // 默认 100MB
@@ -128,12 +135,14 @@ func createWriter(cfg Config) io.Writer {
 
 // Default 获取默认日志实例
 func Default() Logger {
-	once.Do(func() {
-		defaultLogger = New(Config{
-			Level:  "info",
-			Output: "stderr",
-			Format: "text",
-		})
+	initOnce.Do(func() {
+		if defaultLogger == nil {
+			defaultLogger = New(Config{
+				Level:  "info",
+				Output: "stderr",
+				Format: "text",
+			})
+		}
 	})
 	return defaultLogger
 }
@@ -141,6 +150,8 @@ func Default() Logger {
 // SetDefault 设置默认日志实例
 func SetDefault(l Logger) {
 	defaultLogger = l
+	// 确保 once 执行过，避免后续 Default() 覆盖
+	initOnce.Do(func() {})
 }
 
 // fieldsToAttrs 将 Field 转换为 slog.Attr

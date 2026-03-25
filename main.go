@@ -54,9 +54,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if cfg.LLM.Debug {
-		llmClient.SetDebug(true)
-	}
+
 
 	// 获取工作目录
 	cwd, err := os.Getwd()
@@ -87,7 +85,6 @@ func main() {
 	// 创建 TUI 模型
 	model := tui.NewModel(llmClient, session, toolReg,
 		tui.WithCWD(cwd),
-		tui.WithDebug(cfg.LLM.Debug),
 		tui.WithThinking(cfg.Agent.Thinking),
 		tui.WithAvailableModels(config.AvailableModels),
 	)

@@ -5,7 +5,6 @@ llm:
   provider: iflow          # LLM 提供商: iflow, openai
   model: qwen3-coder-plus  # 使用的模型
   timeout: 180             # 请求超时时间(秒)
-  debug: true             # 调试模式
 
 ui:
   theme: dark              # 主题: dark, light
@@ -17,7 +16,7 @@ agent:
   thinking: true           # 启用思考模式
 
 logger:
-  level: info              # 日志级别: debug, info, warn, error
+  level: debug              # 日志级别: debug, info, warn, error
   output: log/copilot.log  # 输出位置: stdout, stderr, 文件路径
   format: text             # 格式: text, json
   max_size: 100            # 日志文件最大大小(MB)

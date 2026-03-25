@@ -64,8 +64,10 @@ func (m *MockLLMClient) SetModel(model string) {
 	m.Model = model
 }
 
-// SetDebug 设置调试模式
-func (m *MockLLMClient) SetDebug(debug bool) {}
+// ChatStream 发送流式聊天请求
+func (m *MockLLMClient) ChatStream(ctx context.Context, req *port.ChatRequest, handler port.StreamHandler) error {
+	return nil
+}
 
 // SetResponse 设置响应
 func (m *MockLLMClient) SetResponse(input, output string) {

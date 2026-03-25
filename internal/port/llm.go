@@ -26,9 +26,6 @@ type LLMClient interface {
 
 	// SetModel 设置使用的模型
 	SetModel(model string)
-
-	// SetDebug 设置调试模式
-	SetDebug(debug bool)
 }
 
 // ChatRequest 聊天请求

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -23,7 +22,6 @@ type BaseClient struct {
 	baseURL string
 	model   string
 	client  *http.Client
-	debug   bool
 	logger  logger.Logger
 	name    string
 }
@@ -58,13 +56,6 @@ func NewBaseClient(name string, config port.ProviderConfig, opts ...BaseClientOp
 	return c
 }
 
-// WithDebug 设置调试模式
-func WithDebug(debug bool) BaseClientOption {
-	return func(c *BaseClient) {
-		c.debug = debug
-	}
-}
-
 // WithLogger 设置日志
 func WithLogger(l logger.Logger) BaseClientOption {
 	return func(c *BaseClient) {
@@ -87,10 +78,8 @@ func (c *BaseClient) Chat(ctx context.Context, req *port.ChatRequest) (*port.Cha
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	// 调试模式打印请求
-	if c.debug {
-		c.printDebug("Request", body, "\033[34m")
-	}
+	// 记录请求
+	c.logDebug("Request", body)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL, bytes.NewReader(body))
 	if err != nil {
@@ -110,10 +99,8 @@ func (c *BaseClient) Chat(ctx context.Context, req *port.ChatRequest) (*port.Cha
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
-	// 调试模式打印响应
-	if c.debug {
-		c.printDebug("Response", respBody, "\033[32m")
-	}
+	// 记录响应
+	c.logDebug("Response", respBody)
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, errors.APIError(
@@ -181,31 +168,14 @@ func (c *BaseClient) parseResponse(body []byte) (*port.ChatResponse, error) {
 	return &resp, nil
 }
 
-// printDebug 打印调试信息到文件（TUI 模式下终端输出会被覆盖）
-func (c *BaseClient) printDebug(title string, body []byte, color string) {
-	// 获取当前工作目录
-	cwd, err := os.Getwd()
-	if err != nil {
-		return
-	}
-
-	// 创建 log 目录
-	logDir := cwd + "/log"
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		return
-	}
-
-	// 写入调试日志文件
-	f, err := os.OpenFile(logDir+"/copilot.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
+// logDebug 使用 logger 输出调试信息（日志等级控制是否输出）
+func (c *BaseClient) logDebug(title string, body []byte) {
 	var pretty bytes.Buffer
-	json.Indent(&pretty, body, "", "  ")
-	f.WriteString(fmt.Sprintf("\n========== %s ==========\n", title))
-	f.WriteString(pretty.String() + "\n")
+	if err := json.Indent(&pretty, body, "", "  "); err != nil {
+		c.logger.Debug(title, logger.F("raw", string(body)))
+		return
+	}
+	c.logger.Debug(title, logger.F("body", pretty.String()))
 }
 
 // GetName 获取提供商名称
@@ -221,11 +191,6 @@ func (c *BaseClient) GetModel() string {
 // SetModel 设置模型
 func (c *BaseClient) SetModel(model string) {
 	c.model = model
-}
-
-// SetDebug 设置调试模式
-func (c *BaseClient) SetDebug(debug bool) {
-	c.debug = debug
 }
 
 // ChatStream 发送流式聊天请求
@@ -246,10 +211,8 @@ func (c *BaseClient) ChatStream(ctx context.Context, req *port.ChatRequest, hand
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	// 调试模式打印请求
-	if c.debug {
-		c.printDebug("Stream Request", body, "\033[34m")
-	}
+	// 记录请求
+	c.logDebug("Stream Request", body)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL, bytes.NewReader(body))
 	if err != nil {

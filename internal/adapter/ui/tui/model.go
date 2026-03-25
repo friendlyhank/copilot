@@ -31,7 +31,6 @@ type Model struct {
 	state    ModelState
 	quitting bool
 	thinking bool
-	debug    bool
 
 	// 当前用户输入
 	currentInput string
@@ -96,13 +95,6 @@ func NewModel(llmClient port.LLMClient, session *entity.Session, toolReg port.To
 	}
 
 	return m
-}
-
-// WithDebug 设置调试模式
-func WithDebug(debug bool) ModelOption {
-	return func(m *Model) {
-		m.debug = debug
-	}
 }
 
 // WithCWD 设置工作目录

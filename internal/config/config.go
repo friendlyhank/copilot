@@ -23,7 +23,6 @@ type LLMConfig struct {
 	BaseURL  string `yaml:"base_url" env:"LLM_BASE_URL"`
 	Model    string `yaml:"model" env:"LLM_MODEL"`
 	Timeout  int    `yaml:"timeout" env:"LLM_TIMEOUT"`
-	Debug    bool   `yaml:"debug" env:"LLM_DEBUG"`
 }
 
 // UIConfig UI 配置
@@ -110,9 +109,6 @@ func loadFromEnv(cfg *Config) {
 	}
 	if v := os.Getenv("LLM_TIMEOUT"); v != "" {
 		fmt.Sscanf(v, "%d", &cfg.LLM.Timeout)
-	}
-	if v := os.Getenv("LLM_DEBUG"); v == "true" {
-		cfg.LLM.Debug = true
 	}
 }
 

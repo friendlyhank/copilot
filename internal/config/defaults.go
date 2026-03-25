@@ -7,7 +7,6 @@ func DefaultConfig() *Config {
 			Provider: "iflow",
 			Model:    "qwen3-coder-plus",
 			Timeout:  180,
-			Debug:    false,
 		},
 		UI: UIConfig{
 			Theme:    "dark",
