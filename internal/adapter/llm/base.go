@@ -245,7 +245,7 @@ func (c *BaseClient) ChatStream(ctx context.Context, req *port.ChatRequest, hand
 // parseStreamResponse 解析 SSE 流式响应
 func (c *BaseClient) parseStreamResponse(reader io.Reader, handler port.StreamHandler) error {
 	scanner := bufio.NewScanner(reader)
-	var responseChunks []map[string]any // 收集解析后的 chunk 用于日志
+	collector := newStreamResponseCollector()
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -254,6 +254,9 @@ func (c *BaseClient) parseStreamResponse(reader io.Reader, handler port.StreamHa
 		if line == "" {
 			continue
 		}
+
+		// 记录原始行内容
+		c.logger.Debug("SSE line", logger.F("content", line))
 
 		// SSE 格式: "data: {...}"
 		if !strings.HasPrefix(line, "data: ") {
@@ -274,13 +277,8 @@ func (c *BaseClient) parseStreamResponse(reader io.Reader, handler port.StreamHa
 			continue
 		}
 
-		// 收集用于日志
-		responseChunks = append(responseChunks, map[string]any{
-			"id":        chunk.ID,
-			"model":     chunk.Model,
-			"choices":   chunk.Choices,
-			"tool_calls": chunk.ToolCalls,
-		})
+		// 收集响应
+		collector.Collect(&chunk)
 
 		// 调用 handler 处理 chunk
 		if err := handler(&chunk); err != nil {
@@ -288,26 +286,11 @@ func (c *BaseClient) parseStreamResponse(reader io.Reader, handler port.StreamHa
 		}
 	}
 
-	// 记录流式响应摘要
-	if len(responseChunks) > 0 {
-		// 提取最终内容摘要
-		var contentBuilder strings.Builder
-		var toolCalls []port.StreamToolCall
-		for _, ch := range responseChunks {
-			if choices, ok := ch["choices"].([]port.StreamChoice); len(choices) > 0 && ok {
-				if choices[0].Delta.Content != "" {
-					contentBuilder.WriteString(choices[0].Delta.Content)
-				}
-				if len(choices[0].Delta.ToolCalls) > 0 {
-					toolCalls = append(toolCalls, choices[0].Delta.ToolCalls...)
-				}
-			}
+	// 记录完整响应日志
+	if collector.HasContent() {
+		if respBody, err := json.Marshal(collector.Build()); err == nil {
+			c.logDebug("Stream Response", respBody)
 		}
-		c.logger.Debug("Stream Response",
-			logger.F("chunks", len(responseChunks)),
-			logger.F("content_len", contentBuilder.Len()),
-			logger.F("tool_calls", len(toolCalls)),
-		)
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -315,4 +298,114 @@ func (c *BaseClient) parseStreamResponse(reader io.Reader, handler port.StreamHa
 	}
 
 	return nil
+}
+
+// streamResponseCollector 流式响应收集器
+// 用于收集流式响应的各个 chunk，拼接成完整响应
+type streamResponseCollector struct {
+	id            string
+	model         string
+	content       strings.Builder
+	toolCalls     []map[string]any
+	finishReason  string
+	chunkCount    int
+}
+
+// newStreamResponseCollector 创建收集器
+func newStreamResponseCollector() *streamResponseCollector {
+	return &streamResponseCollector{}
+}
+
+// Collect 收集单个 chunk
+func (c *streamResponseCollector) Collect(chunk *port.StreamChunk) {
+	c.chunkCount++
+
+	// 收集基本信息
+	if chunk.ID != "" {
+		c.id = chunk.ID
+	}
+	if chunk.Model != "" {
+		c.model = chunk.Model
+	}
+
+	// 处理 choices
+	if len(chunk.Choices) == 0 {
+		return
+	}
+
+	choice := chunk.Choices[0]
+
+	// 拼接内容
+	if choice.Delta.Content != "" {
+		c.content.WriteString(choice.Delta.Content)
+	}
+
+	// 收集工具调用
+	for _, tc := range choice.Delta.ToolCalls {
+		c.collectToolCall(tc)
+	}
+
+	// 记录结束原因
+	if choice.FinishReason != "" {
+		c.finishReason = choice.FinishReason
+	}
+}
+
+// collectToolCall 收集工具调用
+func (c *streamResponseCollector) collectToolCall(tc port.StreamToolCall) {
+	idx := tc.Index
+
+	// 扩展切片
+	for len(c.toolCalls) <= idx {
+		c.toolCalls = append(c.toolCalls, map[string]any{
+			"id":       "",
+			"type":     "function",
+			"function": map[string]any{"name": "", "arguments": ""},
+		})
+	}
+
+	if tc.ID != "" {
+		c.toolCalls[idx]["id"] = tc.ID
+	}
+	if tc.Type != "" {
+		c.toolCalls[idx]["type"] = tc.Type
+	}
+
+	fnMap := c.toolCalls[idx]["function"].(map[string]any)
+	if tc.Function.Name != "" {
+		fnMap["name"] = tc.Function.Name
+	}
+	if tc.Function.Arguments != "" {
+		args := fnMap["arguments"].(string)
+		fnMap["arguments"] = args + tc.Function.Arguments
+	}
+}
+
+// Build 构建完整响应
+func (c *streamResponseCollector) Build() map[string]any {
+	message := map[string]any{
+		"role":    "assistant",
+		"content": c.content.String(),
+	}
+
+	if len(c.toolCalls) > 0 {
+		message["tool_calls"] = c.toolCalls
+	}
+
+	return map[string]any{
+		"id":    c.id,
+		"model": c.model,
+		"choices": []map[string]any{
+			{
+				"index":          0,
+				"message":        message,
+				"finish_reason":  c.finishReason,
+			},
+		},
+	}
+}
+
+// HasContent 是否有内容
+func (c *streamResponseCollector) HasContent() bool {
+	return c.chunkCount > 0
 }
