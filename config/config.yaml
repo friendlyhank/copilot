@@ -16,7 +16,7 @@ agent:
   thinking: true           # 启用思考模式
 
 logger:
-  level: debug              # 日志级别: debug, info, warn, error
+  level: info               # 日志级别: debug, info, warn, error
   output: log/copilot.log  # 输出位置: stdout, stderr, 文件路径
   format: json             # 格式: text, json
   max_size: 100            # 日志文件最大大小(MB)

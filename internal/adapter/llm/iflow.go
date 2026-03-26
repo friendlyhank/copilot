@@ -30,7 +30,7 @@ func NewIflowClient(config port.ProviderConfig) (port.LLMClient, error) {
 		config.BaseURL = IflowDefaultBaseURL
 	}
 	if config.Model == "" {
-		config.Model = "qwen3-coder-plus"
+		config.Model = "qwen3-max"
 	}
 
 	return &IflowClient{

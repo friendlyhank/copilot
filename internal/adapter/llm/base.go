@@ -79,7 +79,7 @@ func (c *BaseClient) Chat(ctx context.Context, req *port.ChatRequest) (*port.Cha
 	}
 
 	// 记录请求
-	c.logDebug("Request", body)
+	c.logger.Debug("Request", logger.F("body", llmReq))
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL, bytes.NewReader(body))
 	if err != nil {
@@ -100,7 +100,7 @@ func (c *BaseClient) Chat(ctx context.Context, req *port.ChatRequest) (*port.Cha
 	}
 
 	// 记录响应
-	c.logDebug("Response", respBody)
+	c.logger.Debug("Response", logger.F("body", string(respBody)))
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, errors.APIError(
@@ -168,16 +168,6 @@ func (c *BaseClient) parseResponse(body []byte) (*port.ChatResponse, error) {
 	return &resp, nil
 }
 
-// logDebug 使用 logger 输出调试信息（日志等级控制是否输出）
-func (c *BaseClient) logDebug(title string, body []byte) {
-	var pretty bytes.Buffer
-	if err := json.Indent(&pretty, body, "", "  "); err != nil {
-		c.logger.Debug(title, logger.F("raw", string(body)))
-		return
-	}
-	c.logger.Debug(title, logger.F("body", pretty.String()))
-}
-
 // GetName 获取提供商名称
 func (c *BaseClient) GetName() string {
 	return c.name
@@ -212,7 +202,7 @@ func (c *BaseClient) ChatStream(ctx context.Context, req *port.ChatRequest, hand
 	}
 
 	// 记录请求
-	c.logDebug("Stream Request", body)
+	c.logger.Info("Stream Request", logger.F("body", llmReq))
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL, bytes.NewReader(body))
 	if err != nil {
@@ -291,9 +281,7 @@ func (c *BaseClient) parseStreamResponse(reader io.Reader, handler port.StreamHa
 
 	// 记录完整响应日志
 	if collector.HasContent() {
-		if respBody, err := json.Marshal(collector.Build()); err == nil {
-			c.logDebug("Stream Response", respBody)
-		}
+		c.logger.Info("Stream Response", logger.F("body", collector.Build()))
 	}
 
 	if err := scanner.Err(); err != nil {
