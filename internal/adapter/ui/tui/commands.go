@@ -53,7 +53,7 @@ Tips:
 		if m.session != nil {
 			m.session.Clear()
 		}
-		if todoTool, ok := m.toolReg.Get("todo_write"); ok {
+		if todoTool, ok := m.toolReg.Get("todo"); ok {
 			if resetter, ok := todoTool.(interface{ Reset() }); ok {
 				resetter.Reset()
 			}
@@ -80,10 +80,7 @@ func (m *Model) handleMessage(input string) (tea.Model, tea.Cmd) {
 	// 保存当前输入
 	m.currentInput = input
 
-	systemPrompt := fmt.Sprintf("You are a coding agent at %s. Use the todo_write tool to plan multi-step tasks. Mark in_progress before starting, completed when done. Prefer tools over prose.", m.cwd)
-	if m.thinking {
-
-	}
+	systemPrompt := fmt.Sprintf("You are a coding agent at %s. Use the todo tool to plan multi-step tasks. Mark in_progress before starting, completed when done. Prefer tools over prose.", m.cwd)
 
 	// 创建 Agent
 	m.agent = usecase.NewAgent(m.llmClient, m.toolReg, m.session, usecase.AgentConfig{

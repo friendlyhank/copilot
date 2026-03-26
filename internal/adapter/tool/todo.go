@@ -10,45 +10,45 @@ import (
 	"ai_code/pkg/logger"
 )
 
-type TodoWriteTool struct {
+type TodoTool struct {
 	mu     sync.RWMutex
-	items  []todoItem
+	items  []todoEntry
 	logger logger.Logger
 }
 
-type todoItem struct {
+type todoEntry struct {
 	ID      string `json:"id"`
 	Content string `json:"content"`
 	Status  string `json:"status"`
 }
 
-type todoWriteInput struct {
-	Todos []todoWriteItem `json:"todos"`
-	Items []todoWriteItem `json:"items"`
+type todoInput struct {
+	Todos []todoInputItem `json:"todos"`
+	Items []todoInputItem `json:"items"`
 }
 
-type todoWriteItem struct {
+type todoInputItem struct {
 	ID      string `json:"id"`
 	Content string `json:"content"`
 	Text    string `json:"text"`
 	Status  string `json:"status"`
 }
 
-func NewTodoWriteTool() *TodoWriteTool {
-	return &TodoWriteTool{
-		logger: logger.Default().WithPrefix("todo_write"),
+func NewTodoTool() *TodoTool {
+	return &TodoTool{
+		logger: logger.Default().WithPrefix("todo"),
 	}
 }
 
-func (t *TodoWriteTool) Name() string {
-	return "todo_write"
+func (t *TodoTool) Name() string {
+	return "todo"
 }
 
-func (t *TodoWriteTool) Description() string {
+func (t *TodoTool) Description() string {
 	return "Update task list. Track progress on multi-step tasks."
 }
 
-func (t *TodoWriteTool) Parameters() map[string]interface{} {
+func (t *TodoTool) Parameters() map[string]interface{} {
 	itemSchema := map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -95,8 +95,8 @@ func (t *TodoWriteTool) Parameters() map[string]interface{} {
 	}
 }
 
-func (t *TodoWriteTool) Execute(ctx context.Context, args string) (string, error) {
-	var input todoWriteInput
+func (t *TodoTool) Execute(ctx context.Context, args string) (string, error) {
+	var input todoInput
 	if err := json.Unmarshal([]byte(args), &input); err != nil {
 		return "", errors.Wrap(errors.CodeInvalidInput, "failed to parse arguments", err)
 	}
@@ -115,18 +115,18 @@ func (t *TodoWriteTool) Execute(ctx context.Context, args string) (string, error
 	return rendered, nil
 }
 
-func (t *TodoWriteTool) Reset() {
+func (t *TodoTool) Reset() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.items = nil
 }
 
-func (t *TodoWriteTool) replace(items []todoWriteItem) (string, error) {
+func (t *TodoTool) replace(items []todoInputItem) (string, error) {
 	if len(items) > 20 {
 		return "", errors.New(errors.CodeInvalidInput, "max 20 todos allowed")
 	}
 
-	validated := make([]todoItem, 0, len(items))
+	validated := make([]todoEntry, 0, len(items))
 	inProgressCount := 0
 	seen := make(map[string]struct{}, len(items))
 
@@ -158,7 +158,7 @@ func (t *TodoWriteTool) replace(items []todoWriteItem) (string, error) {
 		}
 
 		seen[id] = struct{}{}
-		validated = append(validated, todoItem{
+		validated = append(validated, todoEntry{
 			ID:      id,
 			Content: content,
 			Status:  status,
@@ -176,7 +176,7 @@ func (t *TodoWriteTool) replace(items []todoWriteItem) (string, error) {
 	return t.renderLocked(), nil
 }
 
-func (t *TodoWriteTool) renderLocked() string {
+func (t *TodoTool) renderLocked() string {
 	if len(t.items) == 0 {
 		return "No todos."
 	}

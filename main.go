@@ -76,7 +76,7 @@ func main() {
 	toolReg.Register(tool.NewEditFileTool(
 		tool.WithEditFileCWD(cwd),
 	))
-	toolReg.Register(tool.NewTodoWriteTool())
+	toolReg.Register(tool.NewTodoTool())
 
 	// 创建会话
 	session := entity.NewSession(cfg.LLM.Model, cfg.LLM.Provider)

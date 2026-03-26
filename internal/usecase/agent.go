@@ -66,7 +66,7 @@ func NewAgent(llmClient port.LLMClient, toolReg port.ToolRegistry, session *enti
 		session:      session,
 		config:       config,
 		logger:       logger.Default().WithPrefix("agent"),
-		todoTool:     "todo_write",
+		todoTool:     "todo",
 		todoNagAfter: 3,
 	}
 }

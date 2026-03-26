@@ -6,17 +6,17 @@ import (
 	"testing"
 )
 
-func TestTodoWriteToolExecuteRendersTodos(t *testing.T) {
-	tool := NewTodoWriteTool()
+func TestTodoToolExecuteRendersTodos(t *testing.T) {
+	tool := NewTodoTool()
 
-	output, err := tool.Execute(context.Background(), `{"todos":[{"id":"1","content":"调查项目结构","status":"completed"},{"id":"2","content":"实现 todo_write","status":"in_progress"},{"id":"3","content":"运行测试","status":"pending"}]}`)
+	output, err := tool.Execute(context.Background(), `{"todos":[{"id":"1","content":"调查项目结构","status":"completed"},{"id":"2","content":"实现 todo","status":"in_progress"},{"id":"3","content":"运行测试","status":"pending"}]}`)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 
 	expected := []string{
 		"[x] #1: 调查项目结构",
-		"[>] #2: 实现 todo_write",
+		"[>] #2: 实现 todo",
 		"[ ] #3: 运行测试",
 		"(1/3 completed)",
 	}
@@ -28,8 +28,8 @@ func TestTodoWriteToolExecuteRendersTodos(t *testing.T) {
 	}
 }
 
-func TestTodoWriteToolRejectsMultipleInProgress(t *testing.T) {
-	tool := NewTodoWriteTool()
+func TestTodoToolRejectsMultipleInProgress(t *testing.T) {
+	tool := NewTodoTool()
 
 	_, err := tool.Execute(context.Background(), `{"todos":[{"id":"1","content":"第一步","status":"in_progress"},{"id":"2","content":"第二步","status":"in_progress"}]}`)
 	if err == nil {
@@ -37,8 +37,8 @@ func TestTodoWriteToolRejectsMultipleInProgress(t *testing.T) {
 	}
 }
 
-func TestTodoWriteToolSupportsItemsAlias(t *testing.T) {
-	tool := NewTodoWriteTool()
+func TestTodoToolSupportsItemsAlias(t *testing.T) {
+	tool := NewTodoTool()
 
 	output, err := tool.Execute(context.Background(), `{"items":[{"id":"1","text":"读取参考实现","status":"completed"}]}`)
 	if err != nil {
