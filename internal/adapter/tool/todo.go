@@ -10,6 +10,13 @@ import (
 	"ai_code/pkg/logger"
 )
 
+// Todo status constants
+const (
+	TodoStatusPending    = "pending"
+	TodoStatusInProgress = "in_progress"
+	TodoStatusCompleted  = "completed"
+)
+
 type TodoTool struct {
 	mu     sync.RWMutex
 	items  []todoEntry
@@ -67,7 +74,7 @@ func (t *TodoTool) Parameters() map[string]interface{} {
 			"status": map[string]interface{}{
 				"type":        "string",
 				"description": "The task status",
-				"enum":        []string{"pending", "in_progress", "completed"},
+				"enum":        []string{TodoStatusPending, TodoStatusInProgress, TodoStatusCompleted},
 			},
 		},
 		"required": []string{"status"},
@@ -137,7 +144,7 @@ func (t *TodoTool) replace(items []todoInputItem) (string, error) {
 		}
 		status := item.Status
 		if status == "" {
-			status = "pending"
+			status = TodoStatusPending
 		}
 		id := item.ID
 		if id == "" {
@@ -147,13 +154,13 @@ func (t *TodoTool) replace(items []todoInputItem) (string, error) {
 		if content == "" {
 			return "", errors.New(errors.CodeInvalidInput, "todo content required")
 		}
-		if status != "pending" && status != "in_progress" && status != "completed" {
+		if status != TodoStatusPending && status != TodoStatusInProgress && status != TodoStatusCompleted {
 			return "", errors.New(errors.CodeInvalidInput, "invalid todo status: "+status)
 		}
 		if _, exists := seen[id]; exists {
 			return "", errors.New(errors.CodeInvalidInput, "duplicate todo id: "+id)
 		}
-		if status == "in_progress" {
+		if status == TodoStatusInProgress {
 			inProgressCount++
 		}
 
@@ -185,10 +192,10 @@ func (t *TodoTool) renderLocked() string {
 	lines := make([]string, 0, len(t.items)+1)
 	for _, item := range t.items {
 		marker := "[ ]"
-		if item.Status == "in_progress" {
+		if item.Status == TodoStatusInProgress {
 			marker = "[>]"
 		}
-		if item.Status == "completed" {
+		if item.Status == TodoStatusCompleted {
 			marker = "[x]"
 			done++
 		}

@@ -265,21 +265,35 @@ func (a *Agent) executeTool(ctx context.Context, call entity.ToolCall) (entity.T
 	return result, nil
 }
 
+// injectTodoReminder 在工具执行结果中注入 Todo 提醒
+// 该函数用于追踪 LLM 在多轮对话中是否使用了 todo 工具，若连续多轮未使用则自动注入提醒
+// 参数:
+//   - results: 工具执行结果列表
+//   - usedTodo: 本轮是否使用了 todo 工具
+//
+// 返回:
+//   - 可能被修改的工具执行结果列表
 func (a *Agent) injectTodoReminder(results []entity.ToolResult, usedTodo bool) []entity.ToolResult {
+	// 如果本轮使用了 todo 工具，重置计数器并直接返回原结果
 	if usedTodo {
 		a.todoRounds = 0
 		return results
 	}
 
+	// 未使用 todo 工具，计数器递增
 	a.todoRounds++
+
+	// 若未达到提醒阈值，直接返回原结果
 	if a.todoRounds < a.todoNagAfter {
 		return results
 	}
 
+	// 如果没有结果，无需注入提醒
 	if len(results) == 0 {
 		return results
 	}
 
+	// 在第一个工具结果的 Content 前添加提醒信息
 	results[0].Content = "<reminder>Update your todos.</reminder>\n" + results[0].Content
 	return results
 }
