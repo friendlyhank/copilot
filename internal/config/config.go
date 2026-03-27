@@ -4,25 +4,28 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Config 应用配置结构
+// 注意: LLM 配置从 .env 环境变量读取，不通过 yaml 文件配置
 type Config struct {
-	LLM    LLMConfig    `yaml:"llm"`
+	LLM    LLMConfig    // 从环境变量读取
 	UI     UIConfig     `yaml:"ui"`
 	Agent  AgentConfig  `yaml:"agent"`
 	Logger LoggerConfig `yaml:"logger"`
 }
 
-// LLMConfig LLM 配置
+// LLMConfig LLM 配置 (从 .env 读取)
 type LLMConfig struct {
-	Provider string `yaml:"provider" env:"LLM_PROVIDER"`
-	APIKey   string `yaml:"api_key" env:"LLM_API_KEY"`
-	BaseURL  string `yaml:"base_url" env:"LLM_BASE_URL"`
-	Model    string `yaml:"model" env:"LLM_MODEL"`
-	Timeout  int    `yaml:"timeout" env:"LLM_TIMEOUT"`
+	Provider       string   // LLM 提供商: iflow, openai
+	APIKey         string   // API Key
+	BaseURL        string   // API Base URL (可选)
+	Model          string   // 默认模型
+	AvailableModels []string // 可选模型列表
+	Timeout        int      // 请求超时时间(秒)
 }
 
 // UIConfig UI 配置
@@ -109,6 +112,14 @@ func loadFromEnv(cfg *Config) {
 	}
 	if v := os.Getenv("LLM_TIMEOUT"); v != "" {
 		fmt.Sscanf(v, "%d", &cfg.LLM.Timeout)
+	}
+	// 读取可选模型列表
+	if v := os.Getenv("LLM_AVAILABLE_MODELS"); v != "" {
+		models := strings.Split(v, ",")
+		for i, m := range models {
+			models[i] = strings.TrimSpace(m)
+		}
+		cfg.LLM.AvailableModels = models
 	}
 }
 

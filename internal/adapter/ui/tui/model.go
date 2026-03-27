@@ -76,18 +76,13 @@ type ModelOption func(*Model)
 // NewModel 创建模型
 func NewModel(llmClient port.LLMClient, session *entity.Session, toolReg port.ToolRegistry, opts ...ModelOption) *Model {
 	m := &Model{
-		state:     StateInput,
-		llmClient: llmClient,
-		session:   session,
-		toolReg:   toolReg,
-		messages:  []UIMessage{},
-		availableModels: []string{
-			"qwen3-max",
-			"qwen3-coder-plus",
-			"kimi-k2-0905",
-			"deepseek-v3.2",
-		},
-		styles: DefaultStyles,
+		state:           StateInput,
+		llmClient:       llmClient,
+		session:         session,
+		toolReg:         toolReg,
+		messages:        []UIMessage{},
+		availableModels: []string{},
+		styles:          DefaultStyles,
 	}
 
 	for _, opt := range opts {

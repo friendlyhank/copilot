@@ -85,7 +85,7 @@ func main() {
 	model := tui.NewModel(llmClient, session, toolReg,
 		tui.WithCWD(cwd),
 		tui.WithThinking(cfg.Agent.Thinking),
-		tui.WithAvailableModels(config.AvailableModels),
+		tui.WithAvailableModels(cfg.LLM.AvailableModels),
 	)
 
 	// 初始化文本输入

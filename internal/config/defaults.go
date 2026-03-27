@@ -28,11 +28,3 @@ func DefaultConfig() *Config {
 		},
 	}
 }
-
-// AvailableModels 可用模型列表
-var AvailableModels = []string{
-	"qwen3-max",
-	"qwen3-coder-plus",
-	"kimi-k2-0905",
-	"deepseek-v3.2",
-}
