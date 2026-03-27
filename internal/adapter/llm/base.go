@@ -81,7 +81,9 @@ func (c *BaseClient) Chat(ctx context.Context, req *port.ChatRequest) (*port.Cha
 	// 记录请求
 	c.logger.Debug("Request", logger.F("body", llmReq))
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL, bytes.NewReader(body))
+	// 构建完整 API 地址
+	apiURL := c.baseURL + "/v1/chat/completions"
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -103,6 +105,10 @@ func (c *BaseClient) Chat(ctx context.Context, req *port.ChatRequest) (*port.Cha
 	c.logger.Debug("Response", logger.F("body", string(respBody)))
 
 	if resp.StatusCode != http.StatusOK {
+		// 记录错误响应日志
+		c.logger.Error("API request failed",
+			logger.F("status", resp.StatusCode),
+			logger.F("body", string(respBody)))
 		return nil, errors.APIError(
 			"API request failed",
 			resp.StatusCode,
@@ -204,7 +210,9 @@ func (c *BaseClient) ChatStream(ctx context.Context, req *port.ChatRequest, hand
 	// 记录请求
 	c.logger.Info("Stream Request", logger.F("body", llmReq))
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL, bytes.NewReader(body))
+	// 构建完整 API 地址
+	apiURL := c.baseURL + "/v1/chat/completions"
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
@@ -221,6 +229,10 @@ func (c *BaseClient) ChatStream(ctx context.Context, req *port.ChatRequest, hand
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
+		// 记录错误响应日志
+		c.logger.Error("API request failed",
+			logger.F("status", resp.StatusCode),
+			logger.F("body", string(respBody)))
 		return errors.APIError(
 			"API request failed",
 			resp.StatusCode,

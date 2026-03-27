@@ -6,7 +6,7 @@ import (
 
 const (
 	// OpenAIDefaultBaseURL OpenAI 默认 API 地址
-	OpenAIDefaultBaseURL = "https://api.openai.com/v1/chat/completions"
+	OpenAIDefaultBaseURL = "https://api.openai.com"
 )
 
 func init() {

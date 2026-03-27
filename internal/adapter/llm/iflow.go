@@ -6,7 +6,7 @@ import (
 
 const (
 	// IflowDefaultBaseURL iFlow 默认 API 地址
-	IflowDefaultBaseURL = "https://apis.iflow.cn/v1/chat/completions"
+	IflowDefaultBaseURL = "https://apis.iflow.cn"
 )
 
 func init() {
