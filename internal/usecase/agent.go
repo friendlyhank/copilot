@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"ai_code/internal/domain/entity"
 	"ai_code/internal/domain/errors"
@@ -51,6 +52,11 @@ type Agent struct {
 	todoTool     string
 	todoRounds   int
 	todoNagAfter int
+
+	// SubAgent 相关
+	isSubAgent     bool                // 是否为子 Agent
+	excludeTools   []string            // 子 Agent 排除的工具列表
+	subAgentConfig port.SubAgentConfig // 子 Agent 配置
 }
 
 // NewAgent 创建 Agent
@@ -68,7 +74,27 @@ func NewAgent(llmClient port.LLMClient, toolReg port.ToolRegistry, session *enti
 		logger:       logger.Default().WithPrefix("agent"),
 		todoTool:     "todo",
 		todoNagAfter: 3,
+		isSubAgent:   false,
 	}
+}
+
+// NewSubAgent 创建子 Agent
+// 子 Agent 使用独立的 Session，排除指定工具（防止递归调用 task 工具）
+func NewSubAgent(llmClient port.LLMClient, toolReg port.ToolRegistry, config AgentConfig, subConfig port.SubAgentConfig) *Agent {
+	// 创建独立的 Session
+	session := entity.NewSession(llmClient.GetModel(), llmClient.GetName())
+
+	agent := NewAgent(llmClient, toolReg, session, config)
+	agent.isSubAgent = true
+	agent.excludeTools = []string{"task"} // 子 Agent 不能使用 task 工具
+	agent.subAgentConfig = subConfig
+
+	// 设置子 Agent 的系统提示
+	if subConfig.SystemPrompt != "" {
+		agent.system = subConfig.SystemPrompt
+	}
+
+	return agent
 }
 
 // SetSystem 设置系统提示
@@ -97,6 +123,90 @@ func (a *Agent) ProcessMessage(ctx context.Context, input string) error {
 	a.session.AddMessage(userMsg)
 
 	return a.Loop(ctx)
+}
+
+// Run 实现 SubAgentRunner 接口
+// 子 Agent 在独立上下文中执行任务，只返回最终摘要
+func (a *Agent) Run(ctx context.Context, prompt string) (string, error) {
+	// 重置 todo 计数
+	a.todoRounds = 0
+
+	// 创建独立的用户消息
+	userMsg := entity.NewMessage(entity.RoleUser, prompt)
+	a.session.AddMessage(userMsg)
+
+	// 执行 Agent 循环
+	var finalContent strings.Builder
+	maxIterations := a.subAgentConfig.MaxIterations
+	if maxIterations == 0 {
+		maxIterations = 30 // 默认最大迭代次数
+	}
+
+	iterationCount := 0
+	for iterationCount < maxIterations {
+		iterationCount++
+		select {
+		case <-ctx.Done():
+			return finalContent.String(), errors.New(errors.CodeContextCanceled, "context canceled")
+		default:
+		}
+
+		// 调用 LLM
+		content, toolCalls, err := a.callLLMStream(ctx)
+		if err != nil {
+			return finalContent.String(), fmt.Errorf("API call failed: %v", err)
+		}
+
+		// 如果没有工具调用，返回最终内容
+		if len(toolCalls) == 0 {
+			finalContent.WriteString(content)
+			return finalContent.String(), nil
+		}
+
+		// 添加 assistant 消息
+		assistantMsg := entity.NewMessage(entity.RoleAssistant, content).
+			WithToolCalls(toolCalls)
+		a.session.AddMessage(assistantMsg)
+
+		// 执行工具调用
+		results := make([]entity.ToolResult, 0, len(toolCalls))
+		for _, toolCall := range toolCalls {
+			result, err := a.executeToolSilent(ctx, toolCall)
+			if err != nil {
+				a.logger.Error("tool execution failed",
+					logger.F("tool", toolCall.GetName()),
+					logger.F("error", err),
+				)
+			}
+			results = append(results, result)
+		}
+
+		// 添加工具结果到会话
+		for _, result := range results {
+			toolMsg := entity.NewMessage(entity.RoleTool, result.Content).
+				WithToolCallID(result.ToolCallID)
+			a.session.AddMessage(toolMsg)
+		}
+	}
+
+	return finalContent.String(), fmt.Errorf("max iterations (%d) reached", maxIterations)
+}
+
+// executeToolSilent 静默执行工具（不发送输出）
+func (a *Agent) executeToolSilent(ctx context.Context, call entity.ToolCall) (entity.ToolResult, error) {
+	// 检查工具是否被排除
+	for _, excluded := range a.excludeTools {
+		if call.GetName() == excluded {
+			return entity.ToolResult{
+				ToolCallID: call.ID,
+				Content:    "Error: This tool is not available in subagent mode",
+				IsError:    true,
+			}, nil
+		}
+	}
+
+	// 执行工具
+	return a.toolReg.ExecuteTool(ctx, call)
 }
 
 // Loop 执行 Agent 循环
@@ -163,6 +273,9 @@ func (a *Agent) callLLMStream(ctx context.Context) (string, []entity.ToolCall, e
 	// 构建消息
 	messages := a.buildMessages()
 
+	// 获取工具列表（子 Agent 需要过滤）
+	tools := a.getTools()
+
 	// 构建请求
 	req := &port.ChatRequest{
 		Model:       a.llmClient.GetModel(),
@@ -170,7 +283,7 @@ func (a *Agent) callLLMStream(ctx context.Context) (string, []entity.ToolCall, e
 		Stream:      true,
 		MaxTokens:   a.config.MaxTokens,
 		Temperature: a.config.Temperature,
-		Tools:       a.toolReg.ToLLMTools(),
+		Tools:       tools,
 	}
 
 	var contentBuilder string
@@ -187,7 +300,10 @@ func (a *Agent) callLLMStream(ctx context.Context) (string, []entity.ToolCall, e
 		// 累积文本内容并实时输出
 		if delta.Content != "" {
 			contentBuilder += delta.Content
-			a.emit(OutputTextChunk, delta.Content)
+			// 子 Agent 不输出流式内容到父 Agent
+			if !a.isSubAgent {
+				a.emit(OutputTextChunk, delta.Content)
+			}
 		}
 
 		// 累积工具调用
@@ -233,6 +349,32 @@ func (a *Agent) callLLMStream(ctx context.Context) (string, []entity.ToolCall, e
 	}
 
 	return contentBuilder, toolCalls, nil
+}
+
+// getTools 获取工具列表
+// 子 Agent 需要排除特定工具（如 task）
+func (a *Agent) getTools() []port.ToolDefinition {
+	allTools := a.toolReg.ToLLMTools()
+
+	// 如果不是子 Agent 或者没有排除工具，直接返回
+	if !a.isSubAgent || len(a.excludeTools) == 0 {
+		return allTools
+	}
+
+	// 过滤排除的工具
+	excludeSet := make(map[string]bool)
+	for _, name := range a.excludeTools {
+		excludeSet[name] = true
+	}
+
+	filtered := make([]port.ToolDefinition, 0, len(allTools))
+	for _, tool := range allTools {
+		if !excludeSet[tool.Function.Name] {
+			filtered = append(filtered, tool)
+		}
+	}
+
+	return filtered
 }
 
 // buildMessages 构建消息列表
@@ -310,4 +452,9 @@ func (a *Agent) emitToolResult(result entity.ToolResult) {
 func (a *Agent) SwitchModel(model string) {
 	a.llmClient.SetModel(model)
 	a.session.SetModel(model)
+}
+
+// IsSubAgent 返回是否为子 Agent
+func (a *Agent) IsSubAgent() bool {
+	return a.isSubAgent
 }

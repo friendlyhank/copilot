@@ -29,6 +29,7 @@ Agent 循环就像**一个全能的程序员助手**，它有一个工具箱：
 - **write_file** - 创建新文件，像写新文档
 - **edit_file** - 编辑现有文件，像修改草稿
 - **todo** - 任务清单，像便利贴记录进度
+- **task** - 子智能体，像外包团队处理独立任务
 
 当你给它一个任务："帮我修复这个 bug"，它会：
 
@@ -71,8 +72,8 @@ Agent 循环就像**一个全能的程序员助手**，它有一个工具箱：
 │                        工具体系                              │
 ├─────────────────────────────────────────────────────────────┤
 │  执行类工具                     │  管理类工具               │
-│  ├─ bash      (通用命令)         │  └─ todo (任务追踪)       │
-│  ├─ read_file (读文件)           │                          │
+│  ├─ bash      (通用命令)         │  ├─ todo (任务追踪)       │
+│  ├─ read_file (读文件)           │  └─ task (子智能体)       │
 │  ├─ write_file(写文件)           │                          │
 │  └─ edit_file (编辑文件)         │                          │
 ├─────────────────────────────────────────────────────────────┤
@@ -135,6 +136,7 @@ Agent 循环就像**一个全能的程序员助手**，它有一个工具箱：
 | **write_file** | 创建或覆盖文件 | safe_path + 自动创建目录 | 新建文件、生成代码 |
 | **edit_file** | 精确替换文本 | safe_path + 必须匹配 | 修改现有代码 |
 | **todo** | 任务列表管理 | 数量限制 + 状态校验 | 多步骤任务追踪 |
+| **task** | 启动子智能体 | 工具过滤（防递归） | 上下文隔离的任务分解 |
 
 ### safe_path 沙箱机制
 
@@ -190,69 +192,16 @@ func SafePath(workDir, path string) (string, error) {
 | `./src/main.go` | 相对路径正常 | ✅ 允许 |
 | `/home/user/project/config.yaml` | 在工作目录内 | ✅ 允许 |
 
-### Todo 流程详解
+### Todo 工具概述
 
-#### 为什么需要 Todo 工具？
+Todo 工具用于追踪多步骤任务的进度，防止 LLM 在复杂任务中"迷失方向"。
 
-**问题**：LLM 处理复杂任务时容易"迷失"
+**核心特性**：
+- **状态管理**：pending → in_progress → completed
+- **约束规则**：同时只能有一个 in_progress 任务
+- **自动提醒**：连续 3 轮未使用时注入提醒
 
-```
-用户任务: "重构用户模块，添加缓存，写测试"
-
-LLM 可能的行为:
-1. 开始重构用户模块...
-2. 改了一半，想到要加缓存...
-3. 加缓存时发现需要改接口...
-4. 改接口时忘记原来要做什么...
-5. 最终只完成了一部分
-```
-
-**Todo 的作用**：
-
-1. **显式规划** - 强迫 LLM 先思考任务分解
-2. **进度追踪** - 用户可见任务完成情况
-3. **上下文保持** - LLM 每轮都能看到当前进度
-4. **防止遗漏** - 未完成任务会持续提醒
-
-#### Todo 状态机
-
-```
-pending → in_progress → completed
-         ↑_______________|
-           (可回退重做)
-```
-
-**约束规则**：
-
-1. 同时只能有一个 `in_progress` 任务
-2. 最多 20 个 todo 项
-3. 每个必须有唯一 ID
-4. content/text 二选一（兼容性）
-
-#### Todo 提醒机制
-
-```go
-// internal/usecase/agent.go:205-235
-func (a *Agent) injectTodoReminder(results []entity.ToolResult, usedTodo bool) []entity.ToolResult {
-    if usedTodo {
-        a.todoRounds = 0  // 重置计数器
-        return results
-    }
-
-    a.todoRounds++
-    if a.todoRounds >= a.todoNagAfter {  // 默认 3 轮
-        // 注入提醒
-        results[0].Content = "<reminder>Update your todos.</reminder>\n" + results[0].Content
-    }
-    return results
-}
-```
-
-**设计意图**：
-
-- LLM 连续 3 轮未使用 todo 工具
-- 自动在工具结果中注入提醒
-- 提示 LLM 更新任务进度
+**详细实现参见**：[03-todo.md](03-todo.md)
 
 ---
 
@@ -398,76 +347,7 @@ func (t *WriteFileTool) Execute(ctx context.Context, args string) (string, error
 - 覆盖已存在文件（语义明确）
 - 返回写入字节数，便于确认
 
-### Todo 工具实现
-
-```go
-// internal/adapter/tool/todo.go:84-127
-func (t *TodoTool) replace(items []todoInputItem) (string, error) {
-    // 1. 数量限制
-    if len(items) > 20 {
-        return "", errors.New(errors.CodeInvalidInput, "max 20 todos allowed")
-    }
-
-    validated := make([]todoEntry, 0, len(items))
-    inProgressCount := 0
-    seen := make(map[string]struct{}, len(items))
-
-    for i, item := range items {
-        // 2. 内容校验
-        content := item.Content
-        if content == "" {
-            content = item.Text  // 兼容别名
-        }
-        if content == "" {
-            return "", errors.New(errors.CodeInvalidInput, "todo content required")
-        }
-
-        // 3. 状态校验
-        status := item.Status
-        if status != "pending" && status != "in_progress" && status != "completed" {
-            return "", errors.New(errors.CodeInvalidInput, "invalid status: "+status)
-        }
-
-        // 4. ID 唯一性校验
-        id := item.ID
-        if id == "" {
-            id = fmt.Sprintf("%d", i+1)
-        }
-        if _, exists := seen[id]; exists {
-            return "", errors.New(errors.CodeInvalidInput, "duplicate id: "+id)
-        }
-
-        // 5. 同时只能有一个 in_progress ★
-        if status == "in_progress" {
-            inProgressCount++
-        }
-
-        seen[id] = struct{}{}
-        validated = append(validated, todoEntry{...})
-    }
-
-    if inProgressCount > 1 {
-        return "", errors.New(errors.CodeInvalidInput, "only one in_progress allowed")
-    }
-
-    t.items = validated
-    return t.renderLocked(), nil
-}
-```
-
-**渲染输出**：
-
-```
-[x] #1: 调查项目结构
-[>] #2: 实现 todo 工具
-[ ] #3: 运行测试
-
-(1/3 completed)
-```
-
----
-
-## 可视化图表
+### write_file 实现
 
 ### 工具体系架构图
 

@@ -49,11 +49,13 @@ graph TB
     
     subgraph "应用层 (UseCase)"
         Agent[Agent 编排器]
+        SubAgent[子 Agent]
     end
     
     subgraph "端口层 (Port)"
         LLMPort[LLM 客户端端口]
         ToolPort[工具注册表端口]
+        SubAgentPort[子智能体端口]
     end
     
     subgraph "适配器层 (Adapter)"
@@ -61,6 +63,7 @@ graph TB
         iFlow[iFlow 适配器]
         Bash[Bash 工具]
         FileTools[文件工具]
+        Task[Task 工具]
     end
     
     subgraph "领域层 (Domain)"
@@ -71,10 +74,15 @@ graph TB
     TUI --> Agent
     Agent --> LLMPort
     Agent --> ToolPort
+    Agent --> SubAgentPort
+    SubAgent --> LLMPort
+    SubAgent --> ToolPort
     LLMPort --> OpenAI
     LLMPort --> iFlow
     ToolPort --> Bash
     ToolPort --> FileTools
+    ToolPort --> Task
+    Task --> SubAgent
     Agent --> Entity
     Agent --> Errors
 ```
@@ -100,7 +108,8 @@ copilot/
 │   │   │   ├── read_file.go   # 文件读取工具
 │   │   │   ├── write_file.go  # 文件写入工具
 │   │   │   ├── edit_file.go   # 文件编辑工具
-│   │   │   └── todo.go        # Todo 管理工具
+│   │   │   ├── todo.go        # Todo 管理工具
+│   │   │   └── task.go        # Task 子智能体工具
 │   │   └── ui/tui/            # TUI 界面
 │   │       ├── model.go       # TUI 状态模型
 │   │       ├── update.go      # 事件处理
@@ -120,9 +129,11 @@ copilot/
 │   │       └── errors.go      # 错误定义
 │   ├── port/                  # 端口接口
 │   │   ├── llm.go             # LLM 客户端接口
-│   │   └── tool.go            # 工具接口
+│   │   ├── tool.go            # 工具接口
+│   │   └── subagent.go        # 子智能体接口
 │   └── usecase/               # 用例层
-│       └── agent.go           # Agent 核心逻辑
+│       ├── agent.go           # Agent 核心逻辑（含子 Agent）
+│       └── agent_test.go      # Agent 测试
 └── pkg/
     └── logger/                # 日志库
         └── logger.go          # slog 封装
@@ -132,7 +143,33 @@ copilot/
 
 ## 知识点列表
 
-### 1. 六边形架构设计
+### 1. Todo 任务追踪工具
+
+| 字段 | 内容 |
+|------|------|
+| **名称** | Todo 任务追踪工具 |
+| **概述** | 多步骤任务进度追踪，包含状态管理、自动提醒机制 |
+| **核心源码** | `internal/adapter/tool/todo.go`, `internal/usecase/agent.go` |
+| **难度** | 入门 ⭐ |
+| **前置知识** | 工具注册表 |
+| **学习收益** | 理解 AI Agent 的任务规划和进度追踪机制 |
+
+---
+
+### 2. 子智能体架构设计
+
+| 字段 | 内容 |
+|------|------|
+| **名称** | 子智能体架构设计 (SubAgent) |
+| **概述** | 通过 task 工具启动独立上下文的子 Agent，实现任务隔离和上下文隔离 |
+| **核心源码** | `internal/port/subagent.go`, `internal/adapter/tool/task.go`, `internal/usecase/agent.go` |
+| **难度** | 高级 ⭐⭐⭐ |
+| **前置知识** | Agent 循环、工具注册表、六边形架构 |
+| **学习收益** | 掌握复杂 AI Agent 系统的任务分解和上下文管理技术 |
+
+---
+
+### 2. 六边形架构设计
 
 | 字段 | 内容 |
 |------|------|
@@ -283,6 +320,8 @@ graph LR
         C1[Agent 循环与工具调用流程]
         C2[SSE 流式响应处理]
         C3[Bubble Tea TUI 框架应用]
+        C4[Todo 任务追踪工具]
+        C5[子智能体架构设计]
     end
     
     A1 --> B1
@@ -300,6 +339,13 @@ graph LR
     
     C1 --> C3
     C2 --> C3
+    
+    B2 --> C4
+    C1 --> C4
+    
+    C1 --> C5
+    B2 --> C5
+    B3 --> C5
 ```
 
 ---
@@ -339,6 +385,7 @@ sequenceDiagram
     participant U as 用户
     participant TUI as TUI 界面
     participant Agent as Agent
+    participant SubAgent as 子 Agent
     participant LLM as LLM 客户端
     participant Tool as 工具注册表
     
@@ -350,15 +397,30 @@ sequenceDiagram
         Agent->>LLM: ChatStream(messages, tools)
         LLM-->>Agent: 流式响应 (文本 + ToolCalls)
         
-        alt 有工具调用
+        alt 工具调用 = task
+            Agent->>Tool: ExecuteTool(task)
+            Tool->>SubAgent: Run(prompt)
+            
+            loop 子 Agent 循环
+                SubAgent->>LLM: ChatStream(fresh messages)
+                LLM-->>SubAgent: 流式响应
+                alt 子 Agent 有工具调用
+                    SubAgent->>Tool: ExecuteTool
+                    Tool-->>SubAgent: 结果
+                end
+            end
+            
+            SubAgent-->>Tool: 摘要结果
+            Tool-->>Agent: tool_result
+        else 其他工具调用
             Agent->>Tool: ExecuteTool(toolCall)
             Tool-->>Agent: ToolResult
-            Agent->>Agent: 添加工具结果到 Session
-        else 无工具调用
-            Agent->>TUI: 输出最终响应
         end
+        
+        Agent->>Agent: 添加工具结果到 Session
     end
     
+    Agent-->>TUI: 输出最终响应
     TUI-->>U: 显示响应
 ```
 
@@ -371,6 +433,7 @@ sequenceDiagram
 | **架构** | 六边形架构 | 核心逻辑与外部依赖解耦，易于测试和扩展 |
 | **LLM 集成** | 工厂注册表 + 适配器 | 支持多提供商，新增提供商只需实现接口 |
 | **工具系统** | 统一接口 + 注册表 | 工具可插拔，扩展性强 |
+| **子智能体** | task 工具 + 上下文隔离 | 任务分解、上下文隔离、成本节约 |
 | **流式处理** | SSE + 增量解析 | 实时输出，用户体验好 |
 | **UI 框架** | Bubble Tea (Elm 架构) | 状态管理清晰，事件驱动 |
 | **配置** | 多层加载 + 环境变量覆盖 | 灵活配置，适应多种部署环境 |
@@ -382,6 +445,8 @@ sequenceDiagram
 
 以下知识点建议进一步深入分析（生成单独文档）：
 
-1. **Agent 循环详解** - 包含工具调用决策、上下文管理、错误恢复机制
-2. **SSE 流式处理详解** - 包含 chunk 解析、工具调用累积、异常处理
-3. **TUI 架构详解** - 包含状态机设计、事件流转、异步处理
+1. **Agent 循环详解** - 包含工具调用决策、上下文管理、错误恢复机制 ✅
+2. **SSE 流式处理详解** - 包含 chunk 解析、工具调用累积、异常处理 ✅
+3. **Todo 任务追踪工具** - 包含状态管理、提醒机制、约束规则 ✅
+4. **子智能体架构详解** - 包含上下文隔离、工具过滤、任务分发机制 ✅
+5. **TUI 架构详解** - 包含状态机设计、事件流转、异步处理

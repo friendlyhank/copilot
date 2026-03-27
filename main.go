@@ -78,6 +78,10 @@ func main() {
 	))
 	toolReg.Register(tool.NewTodoTool())
 
+	// 注册 task 工具（用于启动子 Agent）
+	// 子 Agent 会自动排除 task 工具，防止递归调用
+	toolReg.Register(tool.NewTaskTool(llmClient, toolReg, cwd))
+
 	// 创建会话
 	session := entity.NewSession(cfg.LLM.Model, cfg.LLM.Provider)
 
