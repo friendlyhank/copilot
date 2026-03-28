@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/lipgloss"
 
 	"ai_code/internal/usecase"
 )
@@ -20,10 +19,18 @@ func (m *Model) View() string {
 		return m.styles.WelcomeTitle.Render("\n👋 Thanks for using AI Code! See you next time.\n")
 	}
 
-	// 构建底部输入区域（固定高度）
+	// 构建底部区域
 	inputArea := m.renderInputSection()
 	statusBar := m.renderStatusBar()
-	bottomSection := inputArea + "\n" + statusBar + "\n"
+
+	// 计算底部区域实际行数
+	bottomLines := strings.Count(inputArea, "\n") + strings.Count(statusBar, "\n") + 1
+	if bottomLines < 4 {
+		bottomLines = 4
+	}
+
+	// 保存底部行数供消息区域使用
+	m.bottomLines = bottomLines
 
 	// 构建消息历史区域
 	var messagesArea string
@@ -33,27 +40,85 @@ func (m *Model) View() string {
 		messagesArea = m.renderMessagesArea()
 	}
 
-	// 使用 lipgloss 将消息区域放在上方，输入区域固定在底部
-	content := lipgloss.JoinVertical(lipgloss.Top,
-		messagesArea,
-		bottomSection,
-	)
-
-	return content
+	return messagesArea + inputArea + statusBar
 }
 
 // renderMessagesArea 渲染消息区域
 func (m *Model) renderMessagesArea() string {
 	if len(m.messages) == 0 {
-		// 显示简单的欢迎信息
 		return m.styles.WelcomeText.Render("💬 Welcome to AI Code! Type your message below.") + "\n"
 	}
 
-	var b strings.Builder
+	// 构建所有消息内容
+	var lines []string
 	for _, msg := range m.messages {
-		b.WriteString(m.renderMessage(msg) + "\n")
+		content := m.renderMessage(msg)
+		// 按换行符分割每条消息
+		for _, line := range strings.Split(content, "\n") {
+			lines = append(lines, line)
+		}
 	}
-	return b.String()
+
+	// 移除开头和结尾的空行
+	for len(lines) > 0 && lines[0] == "" {
+		lines = lines[1:]
+	}
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+
+	// 使用动态计算的底部区域行数
+	bottomLines := m.bottomLines
+	if bottomLines < 4 {
+		bottomLines = 4
+	}
+	availableHeight := m.height - bottomLines
+	if availableHeight < 5 {
+		availableHeight = 5
+	}
+
+	totalLines := len(lines)
+
+	// 如果内容不超过可用高度，直接显示全部
+	if totalLines <= availableHeight {
+		return strings.Join(lines, "\n") + "\n"
+	}
+
+	// 计算最大滚动偏移
+	maxOffset := totalLines - availableHeight
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+
+	// 如果跟随底部，自动滚动到最新内容
+	if m.followBottom {
+		m.scrollOffset = maxOffset
+	}
+
+	// 限制滚动偏移范围
+	if m.scrollOffset > maxOffset {
+		m.scrollOffset = maxOffset
+	}
+	if m.scrollOffset < 0 {
+		m.scrollOffset = 0
+	}
+
+	// 检查是否滚动到了底部，如果是则恢复跟随
+	if m.scrollOffset >= maxOffset {
+		m.followBottom = true
+	}
+
+	// 计算显示范围
+	startLine := m.scrollOffset
+	endLine := m.scrollOffset + availableHeight
+	if endLine > totalLines {
+		endLine = totalLines
+	}
+
+	// 提取要显示的行
+	visibleLines := lines[startLine:endLine]
+
+	return strings.Join(visibleLines, "\n") + "\n"
 }
 
 // renderInputSection 渲染输入区域（包含分隔线和输入框）

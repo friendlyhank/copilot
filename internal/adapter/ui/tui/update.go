@@ -50,15 +50,46 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyUp:
 			if m.state == StateModelSelector && m.modelIndex > 0 {
 				m.modelIndex--
+			} else if m.state == StateInput {
+				// 向上滚动，停止跟随底部
+				if m.scrollOffset > 0 {
+					m.scrollOffset--
+					m.followBottom = false
+				}
 			}
 			return m, nil
 
 		case tea.KeyDown:
 			if m.state == StateModelSelector && m.modelIndex < len(m.availableModels)-1 {
 				m.modelIndex++
+			} else if m.state == StateInput {
+				// 向下滚动
+				m.scrollOffset++
 			}
 			return m, nil
 		}
+
+	case tea.MouseMsg:
+		// 鼠标滚动事件处理
+		switch msg.Type {
+		case tea.MouseWheelUp:
+			if m.scrollOffset > 0 {
+				m.scrollOffset -= 3
+				if m.scrollOffset < 0 {
+					m.scrollOffset = 0
+				}
+				m.followBottom = false
+			}
+		case tea.MouseWheelDown:
+			m.scrollOffset += 3
+		}
+		return m, nil
+
+	case tea.WindowSizeMsg:
+		// 保存窗口大小
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
 
 	case tickMsg:
 		if m.state == StateProcessing {
@@ -159,6 +190,8 @@ func (m *Model) handleEnter() (tea.Model, tea.Cmd) {
 		Type:    usecase.OutputText,
 		Content: "You: " + input,
 	})
+	// 发送新消息时跟随底部
+	m.followBottom = true
 	if ti, ok := m.textInput.(*textinput.Model); ok {
 		ti.SetValue("")
 		m.textInput = ti
@@ -234,6 +267,8 @@ func (m *Model) handleAgentDone(msg agentDoneMsg) (tea.Model, tea.Cmd) {
 			Content: fmt.Sprintf("Error: %v", msg.err),
 		})
 	}
+	// 消息完成后跟随底部
+	m.followBottom = true
 	return m, nil
 }
 

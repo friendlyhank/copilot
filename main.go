@@ -101,10 +101,11 @@ func main() {
 	ti.Width = 60
 	model.SetTextInput(&ti)
 
-	// 启动 TUI
+	// 启动 TUI（启用鼠标滚动支持）
 	p := tea.NewProgram(
 		model,
 		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
 	)
 
 	m, err := p.Run()

@@ -50,6 +50,19 @@ type Model struct {
 	// UI 消息历史
 	messages []UIMessage
 
+	// 滚动偏移量（显示内容的起始行）
+	scrollOffset int
+
+	// 是否跟随底部（用户是否在查看最新内容）
+	followBottom bool
+
+	// 底部区域行数（动态计算）
+	bottomLines int
+
+	// 窗口尺寸
+	width  int
+	height int
+
 	// 可用模型列表
 	availableModels []string
 	modelIndex      int
