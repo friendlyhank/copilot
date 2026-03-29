@@ -56,9 +56,6 @@ type Model struct {
 	// 是否跟随底部（用户是否在查看最新内容）
 	followBottom bool
 
-	// 底部区域行数（动态计算）
-	bottomLines int
-
 	// 窗口尺寸
 	width  int
 	height int

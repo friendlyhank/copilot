@@ -29,22 +29,19 @@ func (m *Model) View() string {
 		bottomLines = 4
 	}
 
-	// 保存底部行数供消息区域使用
-	m.bottomLines = bottomLines
-
 	// 构建消息历史区域
 	var messagesArea string
 	if m.state == StateModelSelector {
 		messagesArea = m.renderModelSelector()
 	} else {
-		messagesArea = m.renderMessagesArea()
+		messagesArea = m.renderMessagesAreaWithBottom(bottomLines)
 	}
 
 	return messagesArea + inputArea + statusBar
 }
 
-// renderMessagesArea 渲染消息区域
-func (m *Model) renderMessagesArea() string {
+// renderMessagesAreaWithBottom 渲染消息区域，接受底部行数参数
+func (m *Model) renderMessagesAreaWithBottom(bottomLines int) string {
 	if len(m.messages) == 0 {
 		return m.styles.WelcomeText.Render("💬 Welcome to AI Code! Type your message below.") + "\n"
 	}
@@ -67,8 +64,7 @@ func (m *Model) renderMessagesArea() string {
 		lines = lines[:len(lines)-1]
 	}
 
-	// 使用动态计算的底部区域行数
-	bottomLines := m.bottomLines
+	// 使用传入的底部区域行数
 	if bottomLines < 4 {
 		bottomLines = 4
 	}

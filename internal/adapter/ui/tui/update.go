@@ -63,8 +63,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == StateModelSelector && m.modelIndex < len(m.availableModels)-1 {
 				m.modelIndex++
 			} else if m.state == StateInput {
-				// 向下滚动
+				// 向下滚动，恢复跟随底部
 				m.scrollOffset++
+				m.followBottom = true
 			}
 			return m, nil
 		}
@@ -82,6 +83,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case tea.MouseWheelDown:
 			m.scrollOffset += 3
+			m.followBottom = true
 		}
 		return m, nil
 
