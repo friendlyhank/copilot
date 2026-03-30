@@ -1,310 +1,107 @@
 # Todo 任务追踪工具
 
 > **项目**: ai_code (copilot)  
-> **知识点**: Todo 任务追踪工具  
-> **分类**: 工具系统  
-> **分析日期**: 2026-03-27
+> **分析日期**: 2026-03-30
 
 ---
 
-## 目录
+## 一、功能概述
 
-- [第一层：直觉建立](#第一层直觉建立)
-- [第二层：概念框架](#第二层概念框架)
-- [第三层：架构与设计](#第三层架构与设计)
-- [第四层：实现深潜](#第四层实现深潜)
-- [可视化图表](#可视化图表)
-- [总结与延伸](#总结与延伸)
+### 1.1 为什么需要 Todo 工具
 
----
+LLM 处理复杂任务时容易"迷失方向"：
 
-## 第一层：直觉建立
+```mermaid
+graph LR
+    subgraph "无 Todo 的场景"
+        A1[任务: 重构模块+加缓存+写测试]
+        A2[开始重构...]
+        A3[改到一半想加缓存]
+        A4[加缓存发现要改接口]
+        A5[忘记原来要做什么]
+        A6[只完成一部分]
+    end
+    
+    A1 --> A2 --> A3 --> A4 --> A5 --> A6
+    
+    style A6 fill:#ffcdd2
+```
 
-### 生活类比
+**Todo 的作用**：
 
-Todo 工具就像**便利贴任务板**。
+| 作用 | 说明 |
+|------|------|
+| **显式规划** | 强迫 AI 先思考任务分解 |
+| **进度追踪** | 用户可见任务完成情况 |
+| **上下文保持** | AI 每轮都能看到当前进度 |
+| **防止遗漏** | 未完成任务会持续提醒 |
 
-想象你在白板上贴便利贴跟踪任务进度：
+### 1.2 输出效果
 
 ```
 [ ] #1: 分析需求
-[>] #2: 编写代码    ← 正在做（只有一个）
+[>] #2: 编写代码    ← 正在进行（只有一个）
 [ ] #3: 写测试
 [x] #4: 阅读文档    ← 已完成
 
 (1/4 completed)
 ```
 
-### 核心直觉
-
-**为什么 AI 需要 Todo 工具？**
-
-LLM 处理复杂任务时容易"迷失方向"：
-
-```
-用户任务: "重构用户模块，添加缓存，写测试"
-
-AI 可能的行为（无 Todo）:
-1. 开始重构用户模块...
-2. 改了一半，想到要加缓存...
-3. 加缓存时发现需要改接口...
-4. 改接口时忘记原来要做什么...
-5. 最终只完成了一部分
-```
-
-**Todo 的作用**：
-
-1. **显式规划** - 强迫 AI 先思考任务分解
-2. **进度追踪** - 用户可见任务完成情况
-3. **上下文保持** - AI 每轮都能看到当前进度
-4. **防止遗漏** - 未完成任务会持续提醒
-
 ---
 
-## 第二层：概念框架
+## 二、数据结构
 
-### 核心术语
+### 2.1 实体定义
 
-| 术语 | 解释 |
-|------|------|
-| **Todo Item** | 单个任务项，包含 ID、内容、状态 |
-| **Status** | 任务状态：pending / in_progress / completed |
-| **In-Progress Constraint** | 同时只能有一个任务处于 in_progress 状态 |
-
-### Todo 状态机
-
+```mermaid
+classDiagram
+    class TodoTool {
+        -mu sync.RWMutex
+        -items []todoEntry
+        -logger Logger
+        +Name() string
+        +Description() string
+        +Parameters() map
+        +Execute(ctx, args) string, error
+        +Reset()
+        -replace(items) string, error
+        -renderLocked() string
+    }
+    
+    class todoEntry {
+        +ID string
+        +Content string
+        +Status string
+    }
+    
+    class todoInput {
+        +Todos []todoInputItem
+        +Items []todoInputItem
+    }
+    
+    class todoInputItem {
+        +ID string
+        +Content string
+        +Text string
+        +Status string
+    }
+    
+    TodoTool --> todoEntry : manages
+    TodoTool --> todoInput : parses
+    todoInput --> todoInputItem : contains
 ```
-pending → in_progress → completed
-         ↑_______________|
-           (可回退重做)
-```
 
-**约束规则**：
-
-1. 同时只能有一个 `in_progress` 任务
-2. 最多 20 个 todo 项
-3. 每个必须有唯一 ID
-4. `content` / `text` 二选一（兼容性）
-
-### 设计目标
-
-1. **任务可视化** - 让用户了解 AI 的工作进度
-2. **防止迷失** - AI 复杂任务时有明确的任务清单
-3. **进度提醒** - 连续未使用时自动提醒更新
-
----
-
-## 第三层：架构与设计
-
-### 数据结构
+### 2.2 状态常量
 
 ```go
-// todoEntry 单个任务项
-type todoEntry struct {
-    ID      string `json:"id"`      // 唯一标识
-    Content string `json:"content"` // 任务内容
-    Status  string `json:"status"`  // 状态
-}
-
-// 状态常量
 const (
-    TodoStatusPending    = "pending"
-    TodoStatusInProgress = "in_progress"
-    TodoStatusCompleted  = "completed"
+    TodoStatusPending    = "pending"      // 待处理
+    TodoStatusInProgress = "in_progress"  // 进行中
+    TodoStatusCompleted  = "completed"    // 已完成
 )
 ```
 
-### Todo 工具接口
-
-```go
-// internal/adapter/tool/todo.go
-type TodoTool struct {
-    mu     sync.RWMutex   // 并发安全
-    items  []todoEntry    // 任务列表
-    logger logger.Logger
-}
-
-// 工具描述
-func (t *TodoTool) Description() string {
-    return "Update task list. Track progress on multi-step tasks."
-}
-```
-
-### 参数 Schema
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "todos": {
-      "type": "array",
-      "description": "The full todo list to persist",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "string" },
-          "content": { "type": "string" },
-          "text": { "type": "string" },
-          "status": { 
-            "type": "string",
-            "enum": ["pending", "in_progress", "completed"]
-          }
-        },
-        "required": ["status"]
-      }
-    }
-  },
-  "oneOf": [
-    {"required": ["todos"]},
-    {"required": ["items"]}
-  ]
-}
-```
-
-### 提醒机制
-
-```go
-// internal/usecase/agent.go
-func (a *Agent) injectTodoReminder(results []entity.ToolResult, usedTodo bool) []entity.ToolResult {
-    if usedTodo {
-        a.todoRounds = 0  // 重置计数器
-        return results
-    }
-
-    a.todoRounds++
-    if a.todoRounds >= a.todoNagAfter {  // 默认 3 轮
-        // 注入提醒
-        results[0].Content = "<reminder>Update your todos.</reminder>\n" + results[0].Content
-    }
-    return results
-}
-```
-
-**提醒逻辑**：
-- 连续 3 轮未使用 todo 工具
-- 自动在工具结果中注入提醒
-- 提示 AI 更新任务进度
-
----
-
-## 第四层：实现深潜
-
-### 核心实现
-
-```go
-// internal/adapter/tool/todo.go
-func (t *TodoTool) replace(items []todoInputItem) (string, error) {
-    // 1. 数量限制
-    if len(items) > 20 {
-        return "", errors.New("max 20 todos allowed")
-    }
-
-    validated := make([]todoEntry, 0, len(items))
-    inProgressCount := 0
-    seen := make(map[string]struct{}, len(items))
-
-    for i, item := range items {
-        // 2. 内容校验
-        content := item.Content
-        if content == "" {
-            content = item.Text  // 兼容别名
-        }
-        if content == "" {
-            return "", errors.New("todo content required")
-        }
-
-        // 3. 状态校验
-        status := item.Status
-        if status != "pending" && status != "in_progress" && status != "completed" {
-            return "", errors.New("invalid status: " + status)
-        }
-
-        // 4. ID 唯一性校验
-        id := item.ID
-        if id == "" {
-            id = fmt.Sprintf("%d", i+1)
-        }
-        if _, exists := seen[id]; exists {
-            return "", errors.New("duplicate id: " + id)
-        }
-
-        // 5. 统计 in_progress 数量
-        if status == "in_progress" {
-            inProgressCount++
-        }
-
-        seen[id] = struct{}{}
-        validated = append(validated, todoEntry{...})
-    }
-
-    // 6. 同时只能有一个 in_progress
-    if inProgressCount > 1 {
-        return "", errors.New("only one in_progress allowed")
-    }
-
-    t.items = validated
-    return t.renderLocked(), nil
-}
-```
-
-### 渲染输出
-
-```go
-func (t *TodoTool) renderLocked() string {
-    if len(t.items) == 0 {
-        return "No todos."
-    }
-
-    done := 0
-    lines := make([]string, 0, len(t.items)+1)
-    for _, item := range t.items {
-        marker := "[ ]"
-        if item.Status == "in_progress" {
-            marker = "[>]"
-        }
-        if item.Status == "completed" {
-            marker = "[x]"
-            done++
-        }
-        lines = append(lines, fmt.Sprintf("%s #%s: %s", marker, item.ID, item.Content))
-    }
-
-    lines = append(lines, fmt.Sprintf("\n(%d/%d completed)", done, len(t.items)))
-    return strings.Join(lines, "\n")
-}
-```
-
-**输出示例**：
-
-```
-[ ] #1: 调查项目结构
-[>] #2: 实现 todo 工具
-[ ] #3: 运行测试
-
-(0/3 completed)
-```
-
-### 兼容性设计
-
-```go
-// 支持 todos 和 items 两种参数名
-type todoInput struct {
-    Todos []todoInputItem `json:"todos"`
-    Items []todoInputItem `json:"items"`  // 兼容别名
-}
-
-// 支持 content 和 text 两种字段名
-content := item.Content
-if content == "" {
-    content = item.Text  // 兼容别名
-}
-```
-
----
-
-## 可视化图表
-
-### Todo 状态流转
+### 2.3 状态流转
 
 ```mermaid
 stateDiagram-v2
@@ -317,29 +114,314 @@ stateDiagram-v2
     in_progress --> pending: 暂停任务
     
     note right of in_progress
-        同时只能有一个任务
+        约束：同时只能有一个任务
         处于此状态
     end note
 ```
 
-### Todo 提醒机制流程
+---
+
+## 三、工具接口
+
+### 3.1 参数定义
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "todos": {
+      "type": "array",
+      "description": "The full todo list to persist",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The unique identifier of the todo item"
+          },
+          "content": {
+            "type": "string",
+            "description": "The task content"
+          },
+          "text": {
+            "type": "string",
+            "description": "Alias of content for compatibility"
+          },
+          "status": {
+            "type": "string",
+            "description": "The task status",
+            "enum": ["pending", "in_progress", "completed"]
+          }
+        },
+        "required": ["status"]
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "Alias of todos for compatibility"
+    }
+  },
+  "oneOf": [
+    {"required": ["todos"]},
+    {"required": ["items"]}
+  ]
+}
+```
+
+### 3.2 兼容性设计
+
+| 参数/字段 | 主名称 | 别名 | 说明 |
+|----------|-------|------|------|
+| 列表参数 | `todos` | `items` | 兼容不同 LLM 输出 |
+| 内容字段 | `content` | `text` | 兼容不同字段命名 |
+
+---
+
+## 四、执行流程
+
+### 4.1 整体流程
 
 ```mermaid
 flowchart TD
-    A[工具执行完毕] --> B{是否使用 todo?}
-    B -->|是| C[重置计数器]
-    B -->|否| D[计数器 +1]
-    D --> E{计数器 >= 3?}
-    E -->|否| F[返回原结果]
-    E -->|是| G[注入提醒标签]
-    G --> H[返回修改后结果]
-    C --> F
+    Start([Execute 调用]) --> Parse[解析 JSON 参数]
+    Parse --> SelectArray{选择数组}
     
-    style G fill:#fff3e0
-    style C fill:#c8e6c9
+    SelectArray -->|todos 存在| UseTodos[使用 todos]
+    SelectArray -->|items 存在| UseItems[使用 items]
+    
+    UseTodos --> Validate
+    UseItems --> Validate[校验和处理]
+    
+    Validate --> CheckCount{数量 <= 20?}
+    CheckCount -->|否| ErrorCount[错误: max 20 todos]
+    CheckCount -->|是| Loop[遍历处理每个 item]
+    
+    Loop --> CheckContent{有内容?}
+    CheckContent -->|否| ErrorContent[错误: content required]
+    CheckContent -->|是| CheckStatus{状态合法?}
+    
+    CheckStatus -->|否| ErrorStatus[错误: invalid status]
+    CheckStatus -->|是| CheckID{ID 唯一?}
+    
+    CheckID -->|否| ErrorID[错误: duplicate id]
+    CheckID -->|是| CountProgress[统计 in_progress]
+    
+    CountProgress --> CheckProgress{in_progress <= 1?}
+    CheckProgress -->|否| ErrorProgress[错误: only one in_progress]
+    CheckProgress -->|是| Store[存储到 items]
+    
+    Store --> Render[渲染输出]
+    Render --> Return[返回格式化字符串]
+    
+    style ErrorCount fill:#ffcdd2
+    style ErrorContent fill:#ffcdd2
+    style ErrorStatus fill:#ffcdd2
+    style ErrorID fill:#ffcdd2
+    style ErrorProgress fill:#ffcdd2
+    style Return fill:#c8e6c9
 ```
 
-### Todo 与 Agent 交互
+### 4.2 核心校验逻辑
+
+```mermaid
+flowchart LR
+    subgraph "校验链"
+        V1[数量限制 <= 20]
+        V2[内容非空]
+        V3[状态合法]
+        V4[ID 唯一]
+        V5[in_progress <= 1]
+    end
+    
+    V1 --> V2 --> V3 --> V4 --> V5
+    
+    style V1 fill:#e3f2fd
+    style V2 fill:#e3f2fd
+    style V3 fill:#e3f2fd
+    style V4 fill:#e3f2fd
+    style V5 fill:#fff3e0
+```
+
+### 4.3 核心代码解析
+
+**文件路径**: `internal/adapter/tool/todo.go`
+
+```go
+func (t *TodoTool) replace(items []todoInputItem) (string, error) {
+    // 1. 数量限制
+    if len(items) > 20 {
+        return "", errors.New(errors.CodeInvalidInput, "max 20 todos allowed")
+    }
+
+    validated := make([]todoEntry, 0, len(items))
+    inProgressCount := 0
+    seen := make(map[string]struct{}, len(items))
+
+    for i, item := range items {
+        // 2. 内容校验（支持 content/text 别名）
+        content := item.Content
+        if content == "" {
+            content = item.Text
+        }
+        if content == "" {
+            return "", errors.New(errors.CodeInvalidInput, "todo content required")
+        }
+
+        // 3. 状态校验
+        status := item.Status
+        if status != TodoStatusPending && 
+           status != TodoStatusInProgress && 
+           status != TodoStatusCompleted {
+            return "", errors.New(errors.CodeInvalidInput, "invalid todo status: "+status)
+        }
+
+        // 4. ID 唯一性校验
+        id := item.ID
+        if id == "" {
+            id = fmt.Sprintf("%d", i+1)  // 默认 ID
+        }
+        if _, exists := seen[id]; exists {
+            return "", errors.New(errors.CodeInvalidInput, "duplicate todo id: "+id)
+        }
+
+        // 5. 统计 in_progress 数量
+        if status == TodoStatusInProgress {
+            inProgressCount++
+        }
+
+        seen[id] = struct{}{}
+        validated = append(validated, todoEntry{
+            ID:      id,
+            Content: content,
+            Status:  status,
+        })
+    }
+
+    // 6. 同时只能有一个 in_progress ★ 核心约束
+    if inProgressCount > 1 {
+        return "", errors.New(errors.CodeInvalidInput, 
+            "only one todo can be in_progress at a time")
+    }
+
+    t.mu.Lock()
+    defer t.mu.Unlock()
+    t.items = validated
+
+    return t.renderLocked(), nil
+}
+```
+
+---
+
+## 五、渲染输出
+
+### 5.1 渲染逻辑
+
+```go
+func (t *TodoTool) renderLocked() string {
+    if len(t.items) == 0 {
+        return "No todos."
+    }
+
+    done := 0
+    lines := make([]string, 0, len(t.items)+1)
+    for _, item := range t.items {
+        marker := "[ ]"
+        if item.Status == TodoStatusInProgress {
+            marker = "[>]"
+        }
+        if item.Status == TodoStatusCompleted {
+            marker = "[x]"
+            done++
+        }
+        lines = append(lines, fmt.Sprintf("%s #%s: %s", marker, item.ID, item.Content))
+    }
+
+    lines = append(lines, fmt.Sprintf("\n(%d/%d completed)", done, len(t.items)))
+    return joinLines(lines)
+}
+```
+
+### 5.2 输出格式
+
+| 状态 | 标记 | 示例 |
+|------|------|------|
+| pending | `[ ]` | `[ ] #1: 分析需求` |
+| in_progress | `[>]` | `[>] #2: 编写代码` |
+| completed | `[x]` | `[x] #3: 阅读文档` |
+
+---
+
+## 六、提醒机制
+
+### 6.1 设计目的
+
+当 LLM 连续多轮未使用 todo 工具时，自动注入提醒，防止 LLM 忘记更新任务进度。
+
+### 6.2 提醒流程
+
+```mermaid
+flowchart TD
+    A[工具执行完毕] --> B{本轮使用 todo?}
+    
+    B -->|是| C[todoRounds = 0]
+    B -->|否| D[todoRounds++]
+    
+    C --> E[返回原结果]
+    
+    D --> F{todoRounds >= 3?}
+    F -->|否| E
+    F -->|是| G[注入提醒标签]
+    
+    G --> H["结果前添加<br/><reminder>Update your todos.</reminder>"]
+    H --> I[返回修改后结果]
+    
+    style C fill:#c8e6c9
+    style G fill:#fff3e0
+```
+
+### 6.3 核心代码解析
+
+**文件路径**: `internal/usecase/agent.go`
+
+```go
+func (a *Agent) injectTodoReminder(results []entity.ToolResult, usedTodo bool) []entity.ToolResult {
+    // 如果本轮使用了 todo 工具，重置计数器
+    if usedTodo {
+        a.todoRounds = 0
+        return results
+    }
+
+    // 未使用 todo，计数器递增
+    a.todoRounds++
+
+    // 未达到提醒阈值，直接返回
+    if a.todoRounds < a.todoNagAfter {  // 默认 3
+        return results
+    }
+
+    // 没有结果，无需注入
+    if len(results) == 0 {
+        return results
+    }
+
+    // 在第一个工具结果前添加提醒 ★
+    results[0].Content = "<reminder>Update your todos.</reminder>\n" + results[0].Content
+    return results
+}
+```
+
+### 6.4 配置参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `todoNagAfter` | 3 | 连续几轮未使用后提醒 |
+
+---
+
+## 七、Agent 集成
+
+### 7.1 交互序列
 
 ```mermaid
 sequenceDiagram
@@ -347,72 +429,93 @@ sequenceDiagram
     participant A as Agent
     participant L as LLM
     participant T as Todo 工具
-
+    
     U->>A: 复杂任务
+    
+    Note over A,L: 第 1 轮：规划
     A->>L: ChatStream(tools)
     L-->>A: tool_call(todo, [...])
     A->>T: Execute(todo)
     T-->>A: "任务列表已更新"
+    A->>A: todoRounds = 0
     
-    Note over A: todoRounds = 0
+    Note over A,L: 第 2 轮：执行
+    A->>L: ChatStream
+    L-->>A: tool_call(read_file)
+    A->>A: todoRounds++ (now 1)
     
-    loop 连续 3 轮未使用 todo
-        A->>L: ChatStream
-        L-->>A: tool_call(other_tool)
-        A->>A: todoRounds++
-    end
+    Note over A,L: 第 3 轮：继续
+    A->>L: ChatStream
+    L-->>A: tool_call(edit_file)
+    A->>A: todoRounds++ (now 2)
     
-    Note over A: todoRounds >= 3
-    
+    Note over A,L: 第 4 轮：仍未使用
+    A->>L: ChatStream
+    L-->>A: tool_call(bash)
+    A->>A: todoRounds++ (now 3)
     A->>A: injectTodoReminder()
-    Note over A: 结果前添加<br/><reminder>Update your todos.</reminder>
+    Note over A: 结果添加 <reminder>
+```
+
+### 7.2 状态追踪
+
+```mermaid
+stateDiagram-v2
+    [*] --> Round0: 使用 todo
+    
+    state "未使用 todo" as NotUsed {
+        Round1 --> Round2: ++
+        Round2 --> Round3: ++
+    }
+    
+    Round3 --> Inject: 达到阈值
+    Inject --> [*]: 注入提醒
+    
+    NotUsed --> Round0: 使用 todo (重置)
+    Round0 --> Round0: 继续使用
+    
+    note right of Inject
+        在工具结果前添加
+        <reminder>Update your todos.</reminder>
+    end note
 ```
 
 ---
 
-## 总结与延伸
+## 八、设计总结
 
-### 核心要点
+### 8.1 约束规则
 
-1. **任务追踪** - 让 AI 保持对复杂任务的关注
-2. **状态约束** - 同时只有一个 in_progress，防止并行混乱
-3. **自动提醒** - 连续未使用时注入提醒
-4. **兼容设计** - 支持多种参数格式
-
-### 设计亮点
-
-| 亮点 | 说明 |
+| 规则 | 原因 |
 |------|------|
-| **In-Progress 约束** | 强制串行处理，避免混乱 |
-| **自动提醒** | 3 轮未使用自动提示 |
-| **兼容别名** | todos/items, content/text 都支持 |
-| **数量限制** | 最多 20 项，防止过度规划 |
+| 最多 20 个任务 | 防止过度规划 |
+| 同时只能一个 in_progress | 强制串行处理 |
+| ID 必须唯一 | 防止混淆 |
+| content/text 别名 | 兼容性 |
+| todos/items 别名 | 兼容性 |
 
-### 设计局限
+### 8.2 设计亮点
+
+```mermaid
+graph TB
+    subgraph "Todo 工具设计亮点"
+        L1[In-Progress 约束<br/>强制串行处理]
+        L2[自动提醒<br/>3轮未用自动提示]
+        L3[兼容别名<br/>支持多种参数格式]
+        L4[数量限制<br/>防止过度规划]
+    end
+    
+    style L1 fill:#e3f2fd
+    style L2 fill:#fff3e0
+    style L3 fill:#c8e6c9
+    style L4 fill:#f3e5f5
+```
+
+### 8.3 设计局限
 
 | 局限 | 原因 | 可能改进 |
 |------|------|---------|
 | 不持久化 | 内存存储 | 文件/数据库存储 |
 | 无优先级 | 简单设计 | 添加 priority 字段 |
 | 无依赖关系 | 扁平结构 | 支持任务依赖 |
-
-### 面试高频题
-
-1. **Q: 为什么限制只能有一个 in_progress？**
-   A: 强制 AI 串行处理任务，避免同时做多件事导致混乱。符合人类工作习惯，也便于用户追踪当前进度。
-
-2. **Q: Todo 提醒机制如何工作？**
-   A: Agent 追踪连续未使用 todo 工具的轮数，达到阈值（默认 3）后在工具结果中注入 `<reminder>` 标签，提示 AI 更新任务状态。
-
-3. **Q: 为什么需要 content/text 和 todos/items 别名？**
-   A: 兼容不同 LLM 的输出习惯。有些模型可能输出 `content`，有些可能输出 `text`，双字段支持确保都能正确解析。
-
-### 学习路径
-
-1. **前置阅读**：工具注册表
-2. **相关源码**：
-   - `internal/adapter/tool/todo.go` - Todo 工具实现
-   - `internal/usecase/agent.go` - 提醒机制
-3. **延伸阅读**：
-   - [ReAct: Reasoning + Acting](https://arxiv.org/abs/2210.03629)
-   - [Chain of Thought Prompting](https://arxiv.org/abs/2201.11903)
+| 无子任务 | 单层结构 | 支持嵌套任务 |
